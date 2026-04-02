@@ -1,0 +1,430 @@
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
+const path = require("node:path");
+const fs = require("node:fs");
+const { spawn, spawnSync } = require("node:child_process");
+
+const configuredCatalogPath = process.env.MEDIA_WORKSPACE_CATALOG;
+const rootCandidates = [
+  path.resolve(__dirname, "..", "..", ".."),
+  path.resolve(process.cwd(), "..", ".."),
+  path.resolve(process.cwd(), ".."),
+  process.cwd(),
+];
+
+function pickRootDir() {
+  for (const candidate of rootCandidates) {
+    if (fs.existsSync(path.join(candidate, "services", "sidecar", "src"))) {
+      return candidate;
+    }
+  }
+  return rootCandidates[0];
+}
+
+const rootDir = pickRootDir();
+const sidecarSrc = path.join(rootDir, "services", "sidecar", "src");
+const scratchCatalogPath = path.join(rootDir, "data", "ui-import-scratch.mwcatalog");
+const reviewCatalogPath = path.join(rootDir, "data", "review-2026.mwcatalog");
+
+function resolveCatalogPath() {
+  if (configuredCatalogPath) {
+    return path.isAbsolute(configuredCatalogPath)
+      ? configuredCatalogPath
+      : path.resolve(rootDir, configuredCatalogPath);
+  }
+  return scratchCatalogPath;
+}
+
+const catalogPath = resolveCatalogPath();
+
+function prepareCatalogPath() {
+  fs.mkdirSync(catalogPath, { recursive: true });
+}
+
+function workspaceInfo() {
+  return {
+    rootDir,
+    catalogPath,
+    scratchCatalogPath,
+    reviewCatalogPath,
+    sidecarSrc,
+  };
+}
+
+function restartDesktop(nextCatalogPath) {
+  const env = { ...process.env };
+  if (nextCatalogPath) {
+    env.MEDIA_WORKSPACE_CATALOG = nextCatalogPath;
+  } else {
+    delete env.MEDIA_WORKSPACE_CATALOG;
+  }
+  const child = spawn(process.execPath, process.argv.slice(1), {
+    cwd: process.cwd(),
+    detached: true,
+    stdio: "ignore",
+    env,
+  });
+  child.unref();
+  app.quit();
+}
+
+function normalizeCatalogPath(targetPath) {
+  if (!targetPath) {
+    return null;
+  }
+  const resolved = path.isAbsolute(targetPath) ? targetPath : path.resolve(rootDir, targetPath);
+  return resolved.endsWith(".mwcatalog") ? resolved : `${resolved}.mwcatalog`;
+}
+
+function createCatalogAt(targetPath) {
+  const normalizedPath = normalizeCatalogPath(targetPath);
+  if (!normalizedPath) {
+    return null;
+  }
+  fs.mkdirSync(normalizedPath, { recursive: true });
+  return normalizedPath;
+}
+
+function callSidecar(command) {
+  const result = spawnSync(
+    "python3",
+    buildSidecarArgs(command),
+    {
+      cwd: rootDir,
+      env: {
+        ...process.env,
+        PYTHONPATH: sidecarSrc,
+      },
+      encoding: "utf-8",
+    },
+  );
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || "sidecar command failed");
+  }
+
+  return result.stdout.trim();
+}
+
+function callSidecarJson(command) {
+  const payload = callSidecar(command);
+  return payload ? JSON.parse(payload) : null;
+}
+
+function buildSidecarArgs(command) {
+  return ["-m", "media_workspace", "--catalog", catalogPath, ...command];
+}
+
+function spawnDetachedSidecar(command) {
+  return spawn("python3", buildSidecarArgs(command), {
+    cwd: rootDir,
+    env: {
+      ...process.env,
+      PYTHONPATH: sidecarSrc,
+    },
+    detached: true,
+    stdio: "ignore",
+  });
+}
+
+function launchSidecarJob(command) {
+  const child = spawnDetachedSidecar(command);
+  child.unref();
+}
+
+function formatJobStatus(job) {
+  if (!job) {
+    return {
+      running: false,
+      startedAt: null,
+      finishedAt: null,
+      exitCode: null,
+      phase: null,
+      phaseIndex: 0,
+      phaseCount: 0,
+      rawDirs: [],
+      exportDirs: [],
+      phaseResults: [],
+      progress: 0,
+      result: null,
+      error: null,
+      status: null,
+      jobId: null,
+      createdAt: null,
+      updatedAt: null,
+    };
+  }
+  const payload = job.payload || {};
+  const result = job.result || {};
+  const status = String(job.status || "");
+  return {
+    running: status === "queued" || status === "running",
+    startedAt: job.created_at || null,
+    finishedAt: status === "succeeded" || status === "failed" ? job.updated_at || null : null,
+    exitCode: status === "failed" ? 1 : status === "succeeded" ? 0 : null,
+    phase: payload.phase || null,
+    phaseLabel: payload.phase_label || null,
+    phaseIndex: Number(payload.phase_index || 0),
+    phaseCount: Number(payload.phase_count || 0),
+    rawDirs: Array.isArray(payload.raw_dirs) ? payload.raw_dirs : [],
+    exportDirs: Array.isArray(payload.export_dirs) ? payload.export_dirs : [],
+    mode: payload.mode || null,
+    phaseResults: Array.isArray(result.phase_results) ? result.phase_results : [],
+    progress: Number(job.progress || 0),
+    result,
+    error: job.error || null,
+    status,
+    jobId: job.job_id,
+    createdAt: job.created_at || null,
+    updatedAt: job.updated_at || null,
+  };
+}
+
+function latestJobStatus(jobType) {
+  return formatJobStatus(callSidecarJson(["latest-job", "--job-type", jobType]));
+}
+
+function createJob(jobType, payload) {
+  return callSidecarJson(["create-job", "--job-type", jobType, "--payload-json", JSON.stringify(payload || {})]);
+}
+
+function registerRoots(rootType, paths) {
+  const uniquePaths = [...new Set((paths || []).filter(Boolean))];
+  if (!uniquePaths.length) {
+    return [];
+  }
+  const command = ["register-roots", "--root-type", rootType];
+  for (const targetPath of uniquePaths) {
+    command.push("--path", targetPath);
+  }
+  return callSidecarJson(command) || [];
+}
+
+function startEnrichmentTask() {
+  const current = latestJobStatus("enrichment");
+  if (current.running) {
+    return current;
+  }
+  const job = createJob("enrichment", {});
+  launchSidecarJob(["run-enrichment-job", "--job-id", job.job_id]);
+  return formatJobStatus(job);
+}
+
+function startImportTask(options) {
+  const mode = String(options?.mode || "combined");
+  const rawDirs = [...new Set((options?.rawDirs || []).filter(Boolean))];
+  const exportDirs = [...new Set((options?.exportDirs || []).filter(Boolean))];
+  const needsSources = mode === "source_only" || mode === "source_with_media" || mode === "combined";
+  const needsProcessed = mode === "processed_only" || mode === "processed_with_sources" || mode === "combined";
+  if (needsSources && !rawDirs.length) {
+    throw new Error("choose at least one Source file or folder");
+  }
+  if (needsProcessed && !exportDirs.length) {
+    throw new Error("choose at least one Processed Media file or folder");
+  }
+  const current = latestJobStatus("import");
+  if (current.running) {
+    return current;
+  }
+  const job = createJob("import", { raw_dirs: rawDirs, export_dirs: exportDirs, mode });
+  const command = ["run-import-job", "--job-id", job.job_id, "--mode", mode];
+  for (const rawDir of rawDirs) {
+    command.push("--raw-dir", rawDir);
+  }
+  for (const exportDir of exportDirs) {
+    command.push("--export-dir", exportDir);
+  }
+  launchSidecarJob(command);
+  return formatJobStatus(job);
+}
+
+function startPreviewTask() {
+  const current = latestJobStatus("preview");
+  if (current.running) {
+    return current;
+  }
+  const job = createJob("preview", { kind: "preview", asset_type: "export" });
+  launchSidecarJob(["run-preview-job", "--job-id", job.job_id, "--kind", "preview", "--asset-type", "export"]);
+  return formatJobStatus(job);
+}
+
+function createWindow() {
+  const window = new BrowserWindow({
+    width: 1440,
+    height: 920,
+    minWidth: 1080,
+    minHeight: 720,
+    backgroundColor: "#101010",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+    },
+  });
+
+  window.loadFile(path.join(__dirname, "..", "src", "index.html"));
+}
+
+function sendMenuAction(action) {
+  const window = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  if (!window) {
+    return;
+  }
+  window.webContents.send("workspace:menu-action", action);
+}
+
+function buildAppMenu() {
+  const template = [
+    {
+      label: "Framebase",
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { label: "Use Scratch Catalog", click: () => sendMenuAction("catalog:scratch") },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    {
+      label: "File",
+      submenu: [
+        { label: "New Catalog", accelerator: "CmdOrCtrl+N", click: () => sendMenuAction("catalog:new") },
+        { label: "Open Catalog...", accelerator: "CmdOrCtrl+O", click: () => sendMenuAction("catalog:open") },
+        { type: "separator" },
+        { label: "Add Processed Media...", click: () => sendMenuAction("import:pick-export") },
+        { label: "Add Sources...", click: () => sendMenuAction("import:pick-source") },
+        { type: "separator" },
+        { label: "Run Import Pipeline", accelerator: "CmdOrCtrl+I", click: () => sendMenuAction("import:start") },
+        { label: "Run Enrichment", click: () => sendMenuAction("import:enrich") },
+        { label: "Generate Previews", click: () => sendMenuAction("import:previews") },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { label: "Refresh", accelerator: "CmdOrCtrl+R", click: () => sendMenuAction("view:refresh") },
+        { label: "Toggle Theme", click: () => sendMenuAction("view:toggle-theme") },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [{ role: "minimize" }, { role: "zoom" }, { type: "separator" }, { role: "front" }],
+    },
+  ];
+  return Menu.buildFromTemplate(template);
+}
+
+ipcMain.handle("workspace:summary", () => {
+  return JSON.parse(callSidecar(["summary", "--json"]));
+});
+
+ipcMain.handle("workspace:roots", () => {
+  const payload = callSidecar(["catalog-roots"]);
+  return payload ? JSON.parse(payload) : [];
+});
+
+ipcMain.handle("workspace:pick-directories", async (_event, kind) => {
+  const result = await dialog.showOpenDialog({
+    title: kind === "export" ? "Add Processed Media files or folders" : "Add Source files or folders",
+    properties: ["openFile", "openDirectory", "multiSelections"],
+  });
+  return result.canceled ? [] : result.filePaths;
+});
+
+ipcMain.handle("workspace:register-roots", (_event, rootType, paths) => {
+  return registerRoots(rootType, paths);
+});
+
+ipcMain.handle("workspace:pick-catalog", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Choose catalog",
+    properties: ["openDirectory"],
+    defaultPath: path.join(rootDir, "data"),
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle("workspace:create-catalog", async () => {
+  const result = await dialog.showSaveDialog({
+    title: "Create catalog",
+    defaultPath: path.join(rootDir, "data", "untitled.mwcatalog"),
+    buttonLabel: "Create Catalog",
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+  return createCatalogAt(result.filePath);
+});
+
+ipcMain.handle("workspace:switch-catalog", (_event, nextCatalogPath) => {
+  restartDesktop(nextCatalogPath || null);
+  return true;
+});
+
+ipcMain.handle("workspace:import-status", () => latestJobStatus("import"));
+
+ipcMain.handle("workspace:import-start", (_event, options) => startImportTask(options));
+
+ipcMain.handle("workspace:enrichment-status", () => latestJobStatus("enrichment"));
+
+ipcMain.handle("workspace:enrich-start", () => startEnrichmentTask());
+
+ipcMain.handle("workspace:preview-status", () => latestJobStatus("preview"));
+
+ipcMain.handle("workspace:preview-start", () => startPreviewTask());
+
+ipcMain.handle("workspace:pending", () => {
+  const payload = callSidecar(["list-pending"]);
+  return payload ? JSON.parse(payload) : [];
+});
+
+ipcMain.handle("workspace:browse", (_event, options) => {
+  const payload = callSidecar([
+    "browse-exports",
+    "--status",
+    options.status,
+    "--limit",
+    String(options.limit),
+    "--offset",
+    String(options.offset),
+  ]);
+  return payload ? JSON.parse(payload) : [];
+});
+
+ipcMain.handle("workspace:detail", (_event, assetId) => {
+  const payload = callSidecar(["asset-detail", "--asset-id", assetId]);
+  return payload ? JSON.parse(payload) : null;
+});
+
+ipcMain.handle("workspace:reveal", (_event, targetPath) => {
+  if (!targetPath) {
+    return false;
+  }
+  shell.showItemInFolder(targetPath);
+  return true;
+});
+
+ipcMain.handle("workspace:info", () => workspaceInfo());
+
+app.whenReady().then(() => {
+  prepareCatalogPath();
+  Menu.setApplicationMenu(buildAppMenu());
+  createWindow();
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});

@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.pytest_cache/
+.mypy_cache/
+node_modules/
+dist/
+build/
+data/
+*.sqlite3
+
+RESOURCES

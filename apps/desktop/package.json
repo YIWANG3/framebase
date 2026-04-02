@@ -1,0 +1,16 @@
+{
+  "name": "media-workspace-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal Electron shell for Media Resource Management",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^35.1.5"
+  },
+  "dependencies": {
+    "feather-icons": "^4.29.2"
+  }
+}
