@@ -766,7 +766,7 @@ def list_export_assets(
         SELECT
             assets.asset_id,
             assets.stem,
-            assets.canonical_path AS export_path,
+            registry.export_path AS export_path,
             assets.metadata_json AS export_metadata_json,
             registry.match_status,
             registry.score,
@@ -775,7 +775,7 @@ def list_export_assets(
             raw_assets.metadata_json AS raw_metadata_json,
             preview_entries.relative_path AS preview_relative_path
         FROM assets
-        LEFT JOIN export_lookup_registry AS registry
+        JOIN export_lookup_registry AS registry
             ON registry.export_asset_id = assets.asset_id
         LEFT JOIN assets AS raw_assets
             ON raw_assets.asset_id = registry.raw_asset_id
@@ -811,7 +811,13 @@ def get_export_asset_detail(connection: sqlite3.Connection, asset_id: str) -> sq
             raw_preview.relative_path AS raw_preview_relative_path
         FROM assets
         LEFT JOIN export_lookup_registry AS registry
-            ON registry.export_asset_id = assets.asset_id
+            ON registry.rowid = (
+                SELECT reg.rowid
+                FROM export_lookup_registry AS reg
+                WHERE reg.export_asset_id = assets.asset_id
+                ORDER BY reg.updated_at DESC, reg.created_at DESC, reg.export_path DESC
+                LIMIT 1
+            )
         LEFT JOIN assets AS raw_assets
             ON raw_assets.asset_id = registry.raw_asset_id
         LEFT JOIN preview_entries AS export_preview
@@ -826,6 +832,43 @@ def get_export_asset_detail(connection: sqlite3.Connection, asset_id: str) -> sq
           AND assets.asset_type = 'export'
         """,
         (asset_id,),
+    ).fetchone()
+
+
+def get_export_asset_detail_by_path(connection: sqlite3.Connection, export_path: str) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT
+            assets.asset_id,
+            assets.stem,
+            registry.export_path AS export_path,
+            assets.metadata_json AS export_metadata_json,
+            registry.match_status,
+            registry.score,
+            registry.raw_asset_id,
+            registry.feature_vector_json,
+            registry.candidate_json,
+            raw_assets.canonical_path AS raw_path,
+            raw_assets.metadata_json AS raw_metadata_json,
+            export_preview.relative_path AS export_preview_relative_path,
+            raw_preview.relative_path AS raw_preview_relative_path
+        FROM export_lookup_registry AS registry
+        JOIN assets
+            ON assets.asset_id = registry.export_asset_id
+           AND assets.asset_type = 'export'
+        LEFT JOIN assets AS raw_assets
+            ON raw_assets.asset_id = registry.raw_asset_id
+        LEFT JOIN preview_entries AS export_preview
+            ON export_preview.asset_id = assets.asset_id
+           AND export_preview.kind = 'preview'
+           AND export_preview.status = 'ready'
+        LEFT JOIN preview_entries AS raw_preview
+            ON raw_preview.asset_id = registry.raw_asset_id
+           AND raw_preview.kind = 'preview'
+           AND raw_preview.status = 'ready'
+        WHERE registry.export_path = ?
+        """,
+        (export_path,),
     ).fetchone()
 
 

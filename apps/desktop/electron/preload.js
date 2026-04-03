@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld("mediaWorkspace", {
   startPreviewGeneration: () => ipcRenderer.invoke("workspace:preview-start"),
   getPending: () => ipcRenderer.invoke("workspace:pending"),
   browseExports: (options) => ipcRenderer.invoke("workspace:browse", options),
-  getAssetDetail: (assetId) => ipcRenderer.invoke("workspace:detail", assetId),
+  getAssetDetail: (exportPath) => ipcRenderer.invoke("workspace:detail", exportPath),
   revealPath: (targetPath) => ipcRenderer.invoke("workspace:reveal", targetPath),
   onMenuAction: (callback) => {
     ipcRenderer.removeAllListeners("workspace:menu-action");

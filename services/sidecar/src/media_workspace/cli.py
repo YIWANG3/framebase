@@ -14,6 +14,7 @@ from .db import (
     connect,
     create_job,
     get_export_asset_detail,
+    get_export_asset_detail_by_path,
     get_job,
     get_latest_job,
     init_db,
@@ -118,7 +119,9 @@ def build_parser() -> argparse.ArgumentParser:
     browse.add_argument("--offset", type=int, default=0)
 
     detail = subparsers.add_parser("asset-detail", parents=[common])
-    detail.add_argument("--asset-id", required=True)
+    detail_group = detail.add_mutually_exclusive_group(required=True)
+    detail_group.add_argument("--asset-id")
+    detail_group.add_argument("--export-path", type=Path)
 
     subparsers.add_parser("list-pending", parents=[common])
 
@@ -378,9 +381,14 @@ def main() -> int:
         return 0
 
     if args.command == "asset-detail":
-        row = get_export_asset_detail(connection, args.asset_id)
+        if args.export_path:
+            row = get_export_asset_detail_by_path(connection, str(args.export_path.resolve()))
+            identifier = str(args.export_path)
+        else:
+            row = get_export_asset_detail(connection, args.asset_id)
+            identifier = args.asset_id
         if row is None:
-            raise SystemExit(f"unknown asset id: {args.asset_id}")
+            raise SystemExit(f"unknown export asset: {identifier}")
         payload = {
             "asset_id": row["asset_id"],
             "stem": row["stem"],

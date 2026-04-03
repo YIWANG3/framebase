@@ -2,15 +2,30 @@
   "name": "media-workspace-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Minimal Electron shell for Media Resource Management",
+  "description": "Framebase desktop shell",
   "main": "electron/main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "npm run dev",
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "vite",
+    "dev:electron": "wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "build": "vite build"
   },
   "devDependencies": {
-    "electron": "^35.1.5"
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.1.2",
+    "cross-env": "^10.0.0",
+    "electron": "^35.1.5",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "vite": "^7.0.0",
+    "wait-on": "^8.0.3"
   },
   "dependencies": {
-    "feather-icons": "^4.29.2"
+    "justified-layout": "^4.1.0",
+    "lucide-react": "^0.541.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
   }
 }

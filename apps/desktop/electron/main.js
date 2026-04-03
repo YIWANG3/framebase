@@ -1,9 +1,15 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, protocol, net } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const { pathToFileURL } = require("node:url");
 const { spawn, spawnSync } = require("node:child_process");
 
+protocol.registerSchemesAsPrivileged([
+  { scheme: "media", privileges: { standard: false, secure: true, supportFetchAPI: true, corsEnabled: true } },
+]);
+
 const configuredCatalogPath = process.env.MEDIA_WORKSPACE_CATALOG;
+const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 const rootCandidates = [
   path.resolve(__dirname, "..", "..", ".."),
   path.resolve(process.cwd(), "..", ".."),
@@ -258,8 +264,23 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
     },
   });
-
-  window.loadFile(path.join(__dirname, "..", "src", "index.html"));
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    console.log(`[renderer:${level}] ${sourceId}:${line} ${message}`);
+  });
+  window.webContents.on("did-fail-load", (_event, code, description, validatedURL) => {
+    console.error(`[renderer:did-fail-load] ${code} ${description} ${validatedURL}`);
+  });
+  window.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[renderer:gone]", details);
+  });
+  window.webContents.on("preload-error", (_event, preloadPath, error) => {
+    console.error(`[renderer:preload-error] ${preloadPath}`, error);
+  });
+  if (devServerUrl) {
+    window.loadURL(devServerUrl);
+    return;
+  }
+  window.loadFile(path.join(__dirname, "..", "dist", "index.html"));
 }
 
 function sendMenuAction(action) {
@@ -307,6 +328,8 @@ function buildAppMenu() {
       submenu: [
         { label: "Refresh", accelerator: "CmdOrCtrl+R", click: () => sendMenuAction("view:refresh") },
         { label: "Toggle Theme", click: () => sendMenuAction("view:toggle-theme") },
+        { type: "separator" },
+        { role: "toggleDevTools", accelerator: "Alt+CommandOrControl+I" },
         { type: "separator" },
         { role: "togglefullscreen" },
       ],
@@ -396,8 +419,8 @@ ipcMain.handle("workspace:browse", (_event, options) => {
   return payload ? JSON.parse(payload) : [];
 });
 
-ipcMain.handle("workspace:detail", (_event, assetId) => {
-  const payload = callSidecar(["asset-detail", "--asset-id", assetId]);
+ipcMain.handle("workspace:detail", (_event, exportPath) => {
+  const payload = callSidecar(["asset-detail", "--export-path", exportPath]);
   return payload ? JSON.parse(payload) : null;
 });
 
@@ -412,6 +435,17 @@ ipcMain.handle("workspace:reveal", (_event, targetPath) => {
 ipcMain.handle("workspace:info", () => workspaceInfo());
 
 app.whenReady().then(() => {
+  protocol.handle("media", (request) => {
+    const raw = request.url.slice("media://".length);
+    const filePath = raw.split("/").map((seg) => decodeURIComponent(seg)).join(path.sep);
+    const resolved = path.resolve(filePath);
+    const inCatalog = resolved.startsWith(catalogPath + path.sep);
+    if (!inCatalog) {
+      return new Response("forbidden", { status: 403 });
+    }
+    return net.fetch(pathToFileURL(resolved).toString());
+  });
+
   prepareCatalogPath();
   Menu.setApplicationMenu(buildAppMenu());
   createWindow();
