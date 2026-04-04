@@ -261,6 +261,23 @@ export default function useWorkspace() {
     setPreviewTask(task);
   }
 
+  async function switchCatalog(nextCatalogPath) {
+    await window.mediaWorkspace.switchCatalog(nextCatalogPath ?? null);
+    setStatus("all");
+    setSort("name-asc");
+    setQuery("");
+    setSelectedExportPath(null);
+    setItems([]);
+    setDetail(null);
+    setBrowserOffset(0);
+    setBrowserHasMore(true);
+    setImportTask(null);
+    setPreviewTask(null);
+    setEnrichmentTask(null);
+    setPendingImport({ rawDirs: [], exportDirs: [] });
+    await refreshAll({ nextStatus: "all" });
+  }
+
   useEffect(() => {
     void refreshAll();
   }, []);
@@ -278,12 +295,12 @@ export default function useWorkspace() {
     window.mediaWorkspace.onMenuAction(async (action) => {
       if (action === "catalog:new") {
         const created = await window.mediaWorkspace.createCatalog();
-        if (created) await window.mediaWorkspace.switchCatalog(created);
+        if (created) await switchCatalog(created);
       } else if (action === "catalog:open") {
         const selected = await window.mediaWorkspace.pickCatalog();
-        if (selected) await window.mediaWorkspace.switchCatalog(selected);
+        if (selected) await switchCatalog(selected);
       } else if (action === "catalog:scratch") {
-        await window.mediaWorkspace.switchCatalog(null);
+        await switchCatalog(null);
       } else if (action === "import:pick-export") {
         await addProcessedMedia();
       } else if (action === "import:pick-source") {
@@ -412,6 +429,7 @@ export default function useWorkspace() {
     activeOverlay,
     addProcessedMedia,
     addSources,
+    switchCatalog,
     runImportPipeline,
     runEnrichment,
     runPreviewGeneration,

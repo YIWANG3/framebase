@@ -41,12 +41,12 @@ export default function App() {
           setHistoryIndex(nextIndex);
           workspace.setStatus(next);
           void workspace.refreshAll({ nextStatus: next });
-        }} /> : <div className="border-r border-border bg-panel" />}
+        }} /> : <div className="bg-panel" />}
 
         <div
           data-value={workspace.sidebarWidth}
           onMouseDown={resizeSidebar}
-          className={`w-[1px] cursor-col-resize bg-border ${showSidebar ? "block" : "hidden"}`}
+          className={`w-px cursor-col-resize bg-border transition-colors hover:bg-accent/40 ${showSidebar ? "block" : "hidden"}`}
         />
 
         <section className="flex min-w-0 min-h-0 flex-col overflow-hidden bg-app">
@@ -103,7 +103,7 @@ export default function App() {
         <div
           data-value={-workspace.inspectorWidth}
           onMouseDown={resizeInspector}
-          className={`w-[1px] cursor-col-resize bg-border ${showInspector ? "block" : "hidden"}`}
+          className={`w-px cursor-col-resize bg-border transition-colors hover:bg-accent/40 ${showInspector ? "block" : "hidden"}`}
         />
 
         {showInspector ? <Inspector detail={workspace.detail} /> : <div className="border-l border-border bg-panel" />}

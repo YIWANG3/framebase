@@ -4,9 +4,50 @@ import { fileName, galleryInfoLabel, buildJustifiedLayout, localFileUrl } from "
 import PreviewImage from "./PreviewImage";
 
 const GAP = 12;
+const CAPTION_HEIGHT = 42;
 const GRID_ASPECT_RATIO = 4 / 3;
-const GRID_CAPTION_HEIGHT = 44;
-const GRID_OVERSCAN_ROWS = 4;
+const OVERSCAN_PX = 800;
+
+function CardContent({ item, selected, onSelect, width, height, fit, containerRef }) {
+  const title = fileName(item.export_path) || item.stem;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(item.export_path)}
+      className="group absolute text-center"
+      style={{
+        width: `${width}px`,
+        height: `${height + CAPTION_HEIGHT}px`,
+        minWidth: 0,
+      }}
+    >
+      <div
+        className={[
+          "relative overflow-hidden rounded bg-panel2 transition-shadow",
+          selected
+            ? "ring-2 ring-accent ring-offset-1 ring-offset-app"
+            : "ring-1 ring-transparent hover:ring-muted/40",
+        ].join(" ")}
+        style={{ height: `${height}px` }}
+      >
+        {item.preview_path ? (
+          <PreviewImage
+            src={localFileUrl(item.preview_path)}
+            alt={item.stem}
+            scrollRootRef={containerRef}
+            fit={fit}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-[11px] text-muted">No preview</div>
+        )}
+      </div>
+      <div className="px-0.5 pt-1.5">
+        <div className="line-clamp-2-custom break-all text-[11px] leading-[1.3] text-text">{title}</div>
+        <div className="mt-0.5 text-[10px] leading-[1.3] text-muted">{galleryInfoLabel(item)}</div>
+      </div>
+    </button>
+  );
+}
 
 export default function Gallery({
   items,
@@ -41,7 +82,7 @@ export default function Gallery({
   useEffect(() => {
     const element = containerRef.current;
     if (!element || !hasMore || loading || loadingMore) return;
-    const preloadThreshold = Math.max(element.clientHeight * 3, 2400);
+    const preloadThreshold = Math.max(element.clientHeight * 5, 4000);
     const remaining = element.scrollHeight - (element.scrollTop + element.clientHeight);
     if (remaining <= preloadThreshold) {
       void onLoadMore?.();
@@ -50,231 +91,160 @@ export default function Gallery({
 
   useEffect(
     () => () => {
-      if (scrollRafRef.current) {
-        cancelAnimationFrame(scrollRafRef.current);
-      }
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
     },
     [],
   );
 
   function handleScroll(event) {
     const element = event.currentTarget;
-    if (scrollRafRef.current) {
-      cancelAnimationFrame(scrollRafRef.current);
-    }
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
     scrollRafRef.current = requestAnimationFrame(() => {
       setScrollTop(element.scrollTop);
       setViewportHeight(element.clientHeight);
     });
     if (!hasMore || loading || loadingMore) return;
-    const preloadThreshold = Math.max(element.clientHeight * 3, 2400);
+    const preloadThreshold = Math.max(element.clientHeight * 5, 4000);
     if (element.scrollTop + element.clientHeight >= element.scrollHeight - preloadThreshold) {
       void onLoadMore?.();
     }
   }
 
-  function renderLoadMoreState() {
-    if (!loadingMore && !hasMore) return null;
-    return <div className="h-3" aria-hidden="true" />;
-  }
-  const rowHeight = Math.round(thumbSize * 0.66);
-  const justified = buildJustifiedLayout(items, Math.max(containerWidth - 32, 0), rowHeight, 12, 38);
+  // --- Grid layout (virtualized) ---
   const gridMetrics = useMemo(() => {
-    const availableWidth = Math.max(containerWidth - 32, thumbSize);
+    if (displayMode !== "grid" || !containerWidth) return null;
+    const availableWidth = Math.max(containerWidth - 24, thumbSize);
     const columnCount = Math.max(1, Math.floor((availableWidth + GAP) / (thumbSize + GAP)));
     const cellWidth = (availableWidth - GAP * (columnCount - 1)) / columnCount;
-    const cardHeight = cellWidth / GRID_ASPECT_RATIO + GRID_CAPTION_HEIGHT;
+    const imgHeight = cellWidth / GRID_ASPECT_RATIO;
+    const cardHeight = imgHeight + CAPTION_HEIGHT;
     const rowStride = cardHeight + GAP;
     const totalRows = Math.ceil(items.length / columnCount);
-    const startRow = Math.max(0, Math.floor(scrollTop / rowStride) - GRID_OVERSCAN_ROWS);
-    const endRow = Math.min(
-      totalRows,
-      Math.ceil((scrollTop + viewportHeight) / rowStride) + GRID_OVERSCAN_ROWS,
-    );
+    const startRow = Math.max(0, Math.floor((scrollTop - OVERSCAN_PX) / rowStride));
+    const endRow = Math.min(totalRows, Math.ceil((scrollTop + viewportHeight + OVERSCAN_PX) / rowStride));
     const visibleItems = [];
-    for (let rowIndex = startRow; rowIndex < endRow; rowIndex += 1) {
-      for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
-        const itemIndex = rowIndex * columnCount + columnIndex;
-        const item = items[itemIndex];
-        if (!item) break;
+    for (let r = startRow; r < endRow; r++) {
+      for (let c = 0; c < columnCount; c++) {
+        const idx = r * columnCount + c;
+        if (idx >= items.length) break;
         visibleItems.push({
-          item,
-          left: columnIndex * (cellWidth + GAP),
-          top: rowIndex * rowStride,
+          item: items[idx],
+          left: c * (cellWidth + GAP),
+          top: r * rowStride,
           width: cellWidth,
-          cardHeight,
+          imgHeight,
         });
       }
     }
-    return {
-      cellWidth,
-      cardHeight,
-      totalHeight: Math.max(0, totalRows * rowStride - GAP),
-      visibleItems,
-    };
-  }, [containerWidth, items, scrollTop, thumbSize, viewportHeight]);
+    return { totalHeight: Math.max(0, totalRows * rowStride - GAP), visibleItems };
+  }, [displayMode, containerWidth, items, scrollTop, viewportHeight, thumbSize]);
+
+  // --- Justified layout (virtualized) ---
+  const justifiedMetrics = useMemo(() => {
+    if (displayMode !== "justified" || !containerWidth) return null;
+    const rowHeight = Math.round(thumbSize * 0.66);
+    const layout = buildJustifiedLayout(items, Math.max(containerWidth - 24, 0), rowHeight, GAP, CAPTION_HEIGHT);
+    if (!layout.rows.length) return null;
+    // Compute row tops for viewport culling
+    const rowTops = layout.rows.map((row) => row[0]?.top ?? 0);
+    const rowBottoms = layout.rows.map((row) => {
+      const maxH = Math.max(...row.map((b) => b.height));
+      return (row[0]?.top ?? 0) + maxH + CAPTION_HEIGHT;
+    });
+    const visTop = scrollTop - OVERSCAN_PX;
+    const visBottom = scrollTop + viewportHeight + OVERSCAN_PX;
+    const visibleBoxes = [];
+    for (let i = 0; i < layout.rows.length; i++) {
+      if (rowBottoms[i] < visTop) continue;
+      if (rowTops[i] > visBottom) break;
+      for (const box of layout.rows[i]) {
+        visibleBoxes.push(box);
+      }
+    }
+    return { containerHeight: layout.containerHeight, visibleBoxes };
+  }, [displayMode, containerWidth, items, scrollTop, viewportHeight, thumbSize]);
+
+  // --- Waterfall layout (virtualized) ---
+  const waterfallMetrics = useMemo(() => {
+    if (displayMode !== "waterfall" || !containerWidth) return null;
+    const availableWidth = Math.max(containerWidth - 24, thumbSize);
+    const columnCount = Math.max(1, Math.floor((availableWidth + GAP) / (thumbSize + GAP)));
+    const colWidth = (availableWidth - GAP * (columnCount - 1)) / columnCount;
+    const colHeights = new Array(columnCount).fill(0);
+    const positions = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const exportMeta = item.export_metadata || {};
+      const w = Number(exportMeta.width || 0);
+      const h = Number(exportMeta.height || 0);
+      const aspect = w > 0 && h > 0 ? w / h : 1;
+      const imgHeight = colWidth / aspect;
+      // Pick shortest column
+      let minCol = 0;
+      for (let c = 1; c < columnCount; c++) {
+        if (colHeights[c] < colHeights[minCol]) minCol = c;
+      }
+      const top = colHeights[minCol];
+      const left = minCol * (colWidth + GAP);
+      positions.push({ item, left, top, width: colWidth, imgHeight });
+      colHeights[minCol] = top + imgHeight + CAPTION_HEIGHT + GAP;
+    }
+    const totalHeight = Math.max(0, Math.max(...colHeights) - GAP);
+    const visTop = scrollTop - OVERSCAN_PX;
+    const visBottom = scrollTop + viewportHeight + OVERSCAN_PX;
+    const visibleItems = positions.filter(
+      (p) => p.top + p.imgHeight + CAPTION_HEIGHT >= visTop && p.top <= visBottom,
+    );
+    return { totalHeight, visibleItems, colWidth };
+  }, [displayMode, containerWidth, items, scrollTop, viewportHeight, thumbSize]);
 
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-muted">
-        <LoaderCircle className="mr-3 h-5 w-5 animate-spin" />
-        Loading assets…
+        <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+        <span className="text-[13px]">Loading…</span>
       </div>
     );
   }
   if (!items.length) {
-    return <div className="px-6 py-12 text-sm text-muted">No assets in this view.</div>;
+    return <div className="px-6 py-12 text-[13px] text-muted">No assets in this view.</div>;
   }
 
-  if (displayMode === "justified" && justified.rows.length) {
-    return (
-      <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-auto px-4 py-4">
-        <div key="justified-layout" className="relative" style={{ height: `${Math.ceil(justified.containerHeight)}px` }}>
-          {justified.rows.map((row) =>
-            row.map(({ item, width, height, left, top }) => {
-              const title = fileName(item.export_path) || item.stem;
-              const selected = item.export_path === selectedExportPath;
-              return (
-                <button
-                  key={item.export_path}
-                  type="button"
-                  onClick={() => onSelect(item.export_path)}
-                  className="justified-card group absolute text-center"
-                  style={{
-                    width: `${width}px`,
-                    height: `${height + 52}px`,
-                    left: `${left}px`,
-                    top: `${top}px`,
-                    minWidth: 0,
-                  }}
-                >
-                  <div
-                    className={[
-                      "relative overflow-hidden rounded-[10px] border bg-panel2 transition",
-                      selected ? "border-accent shadow-[0_0_0_2px_rgba(47,108,224,0.12)]" : "border-border group-hover:border-muted/60",
-                    ].join(" ")}
-                    style={{ height: `${height}px` }}
-                  >
-                    {item.preview_path ? (
-                      <PreviewImage
-                        src={localFileUrl(item.preview_path)}
-                        alt={item.stem}
-                        scrollRootRef={containerRef}
-                        fit="contain"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-[11px] text-muted">No preview</div>
-                    )}
-                  </div>
-                  <div className="min-h-[52px] pt-1">
-                    <div className="line-clamp-2-custom break-all text-[11px] font-medium leading-[1.15] text-text">{title}</div>
-                    <div className="mt-0.5 text-[10px] text-muted">{galleryInfoLabel(item)}</div>
-                  </div>
-                </button>
-              );
-            }),
-          )}
-        </div>
-        {renderLoadMoreState()}
-      </div>
-    );
-  }
+  const metrics = displayMode === "justified" ? justifiedMetrics
+    : displayMode === "waterfall" ? waterfallMetrics
+    : gridMetrics;
 
-  if (displayMode === "waterfall") {
-    return (
-      <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-auto px-4 py-4">
-        <div style={{ columnWidth: `${thumbSize}px`, columnGap: "12px" }}>
-          {items.map((item) => {
-            const exportMeta = item.export_metadata || {};
-            const width = Number(exportMeta.width || 0);
-            const height = Number(exportMeta.height || 0);
-            const aspect = width > 0 && height > 0 ? width / height : 1;
-            const title = fileName(item.export_path) || item.stem;
-            const selected = item.export_path === selectedExportPath;
-            return (
-              <button
-                key={item.export_path}
-                type="button"
-                onClick={() => onSelect(item.export_path)}
-                className="waterfall-card group mb-4 inline-block w-full break-inside-avoid text-center align-top"
-              >
-                <div
-                  className={[
-                    "relative overflow-hidden rounded-[10px] border bg-panel2 transition",
-                    selected ? "border-accent shadow-[0_0_0_2px_rgba(47,108,224,0.12)]" : "border-border group-hover:border-muted/60",
-                  ].join(" ")}
-                  style={{ aspectRatio: `${aspect || 1}` }}
-                >
-                  {item.preview_path ? (
-                    <PreviewImage
-                      src={localFileUrl(item.preview_path)}
-                      alt={item.stem}
-                      scrollRootRef={containerRef}
-                      fit="cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs text-muted">No preview</div>
-                  )}
-                </div>
-                <div className="pt-1">
-                  <div className="line-clamp-2-custom break-all text-[11px] font-medium leading-[1.15] text-text">{title}</div>
-                  <div className="mt-0.5 text-[10px] text-muted">{galleryInfoLabel(item)}</div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        {renderLoadMoreState()}
-      </div>
-    );
-  }
+  const totalHeight = metrics
+    ? displayMode === "justified" ? Math.ceil(metrics.containerHeight) : metrics.totalHeight
+    : 0;
+
+  const visibleItems = metrics
+    ? displayMode === "justified" ? metrics.visibleBoxes : metrics.visibleItems
+    : [];
+
+  const fit = displayMode === "justified" ? "contain" : "cover";
 
   return (
-    <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-auto px-4 py-4">
-      <div className="relative" style={{ height: `${gridMetrics.totalHeight}px` }}>
-        {gridMetrics.visibleItems.map(({ item, left, top, width, cardHeight }) => {
-          const title = fileName(item.export_path) || item.stem;
-          const selected = item.export_path === selectedExportPath;
+    <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-auto px-3 py-3">
+      <div className="relative" style={{ height: `${totalHeight}px` }}>
+        {visibleItems.map((entry) => {
+          const item = entry.item;
+          const imgHeight = entry.height ?? entry.imgHeight;
           return (
-            <button
-              key={item.export_path}
-              type="button"
-              onClick={() => onSelect(item.export_path)}
-              className="grid-card group absolute text-center"
-              style={{
-                left: `${left}px`,
-                top: `${top}px`,
-                width: `${width}px`,
-                height: `${cardHeight}px`,
-              }}
-            >
-              <div
-                className={[
-                  "relative overflow-hidden rounded-[10px] border bg-panel2 transition",
-                  selected ? "border-accent shadow-[0_0_0_2px_rgba(47,108,224,0.12)]" : "border-border group-hover:border-muted/60",
-                ].join(" ")}
-                style={{ height: `${width / GRID_ASPECT_RATIO}px` }}
-              >
-                {item.preview_path ? (
-                  <PreviewImage
-                    src={localFileUrl(item.preview_path)}
-                    alt={item.stem}
-                    scrollRootRef={containerRef}
-                    fit="cover"
-                  />
-                ) : (
-                    <div className="flex h-full w-full items-center justify-center text-sm text-muted">No preview</div>
-                )}
-              </div>
-              <div className="pt-1">
-                <div className="line-clamp-2-custom break-all text-[11px] font-medium leading-[1.15] text-text">{title}</div>
-                <div className="mt-0.5 text-[10px] text-muted">{galleryInfoLabel(item)}</div>
-              </div>
-            </button>
+            <div key={item.export_path} className="absolute" style={{ left: `${entry.left}px`, top: `${entry.top}px` }}>
+              <CardContent
+                item={item}
+                selected={item.export_path === selectedExportPath}
+                onSelect={onSelect}
+                width={entry.width}
+                height={imgHeight}
+                fit={fit}
+                containerRef={containerRef}
+              />
+            </div>
           );
         })}
       </div>
-      {renderLoadMoreState()}
     </div>
   );
 }

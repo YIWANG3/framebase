@@ -2,9 +2,17 @@ import { fileName, escapePathLabel, formatBytes, formatTimestamp, statusLabel, s
 
 function DetailRow({ label, children }) {
   return (
-    <div className="grid grid-cols-[82px_minmax(0,1fr)] gap-3 py-1 text-[11px] leading-[1.35]">
-      <div className="text-muted">{label}</div>
-      <div className="break-words text-text">{children}</div>
+    <div className="flex items-baseline justify-between gap-3 py-[3px] text-[12px] leading-[1.4]">
+      <div className="shrink-0 text-muted">{label}</div>
+      <div className="min-w-0 break-words text-right text-text">{children}</div>
+    </div>
+  );
+}
+
+function SectionHeader({ children }) {
+  return (
+    <div className="mt-4 border-t border-border pt-2.5">
+      <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted">{children}</div>
     </div>
   );
 }
@@ -12,9 +20,9 @@ function DetailRow({ label, children }) {
 export default function Inspector({ detail }) {
   if (!detail) {
     return (
-      <aside className="h-full overflow-y-auto border-l border-border bg-panel px-4 py-5">
-        <div className="rounded-2xl border border-dashed border-border bg-panel2 px-4 py-10 text-center text-sm text-muted">
-          Select an asset to inspect its source, metadata, and current linkage.
+      <aside className="flex h-full items-center justify-center overflow-y-auto border-l border-border bg-panel px-4">
+        <div className="text-center text-[12px] text-muted">
+          Select an asset to view details
         </div>
       </aside>
     );
@@ -31,43 +39,64 @@ export default function Inspector({ detail }) {
   const matched = statusLabel(detail.match_status);
 
   return (
-    <aside className="h-full overflow-y-auto border-l border-border bg-panel px-4 py-5">
-      <div className="mb-3 overflow-hidden rounded-[14px] border border-border bg-panel2">
-        {previewPath ? (
-          <img src={localFileUrl(previewPath)} alt={detail.stem} className="block h-auto w-full object-contain" />
-        ) : (
-          <div className="flex min-h-[180px] items-center justify-center text-sm text-muted">No preview</div>
-        )}
+    <aside className="flex h-full flex-col overflow-hidden border-l border-border bg-panel">
+      <div className="flex-1 overflow-y-auto px-3 py-3 pb-24">
+        <div className="relative mb-3 overflow-hidden rounded bg-panel2">
+          {previewPath ? (
+            <img src={localFileUrl(previewPath)} alt={detail.stem} className="block h-auto w-full object-contain" draggable={false} />
+          ) : (
+            <div className="flex min-h-[160px] items-center justify-center text-[12px] text-muted">No preview</div>
+          )}
+          <span className="absolute left-2 top-2 rounded bg-black/50 px-1.5 py-0.5 text-[10px] font-medium text-white">
+            {formatValue}
+          </span>
+        </div>
+
+        <div className="px-0.5">
+          <h2 className="text-[13px] font-medium leading-tight text-text">{exportName || detail.stem}</h2>
+
+          <SectionHeader>Properties</SectionHeader>
+          <DetailRow label="Status">{matched}</DetailRow>
+          {detail.score != null ? <DetailRow label="Score">{scoreLabel(detail.score)}</DetailRow> : null}
+          <DetailRow label="Dimensions">{dimensions}</DetailRow>
+          <DetailRow label="Size">{fileSize}</DetailRow>
+          <DetailRow label="Type">{formatValue}</DetailRow>
+
+          <SectionHeader>Source</SectionHeader>
+          <DetailRow label="Asset">{escapePathLabel(detail.export_path)}</DetailRow>
+          <DetailRow label="Source">{detail.raw_path ? escapePathLabel(detail.raw_path) : "Not linked"}</DetailRow>
+          <DetailRow label="Source file">{rawName || "—"}</DetailRow>
+
+          <SectionHeader>Camera</SectionHeader>
+          <DetailRow label="Camera">{rawMeta.camera_model || exportMeta.camera_model || "—"}</DetailRow>
+          <DetailRow label="Lens">{rawMeta.lens_model || "—"}</DetailRow>
+
+          <SectionHeader>Dates</SectionHeader>
+          <DetailRow label="Imported">{formatTimestamp(detail.imported_at || exportMeta.imported_at)}</DetailRow>
+          <DetailRow label="Captured">{formatTimestamp(rawMeta.capture_time || exportMeta.capture_time)}</DetailRow>
+          <DetailRow label="Modified">{formatTimestamp(exportMeta.modified_time || detail.updated_at)}</DetailRow>
+        </div>
       </div>
 
-      <h2 className="text-[14px] font-semibold leading-tight text-text">{exportName || detail.stem}</h2>
-      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-        <span className="rounded-full bg-panel2 px-2 py-0.5 text-[10px] font-medium text-text">{matched}</span>
-        <span className="rounded-full bg-panel2 px-2 py-0.5 text-[10px] text-muted">{formatValue}</span>
-        {detail.score != null ? <span className="rounded-full bg-panel2 px-2 py-0.5 text-[10px] text-muted">{scoreLabel(detail.score)}</span> : null}
+      <div className="border-t border-border bg-panel/95 px-3 py-3 backdrop-blur">
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className="rounded-md border border-border bg-panel2 px-3 py-1.5 text-[12px] font-medium text-text transition-colors hover:bg-app"
+            onClick={() => void window.mediaWorkspace?.revealPath?.(detail.export_path)}
+          >
+            Reveal Media
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-border bg-panel2 px-3 py-1.5 text-[12px] font-medium text-text transition-colors hover:bg-app disabled:cursor-default disabled:opacity-40"
+            onClick={() => void window.mediaWorkspace?.revealPath?.(detail.raw_path)}
+            disabled={!detail.raw_path}
+          >
+            Reveal Source
+          </button>
+        </div>
       </div>
-
-      <section className="mt-4 border-t border-border pt-3">
-        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-muted">Link</div>
-        <DetailRow label="Asset">{escapePathLabel(detail.export_path)}</DetailRow>
-        <DetailRow label="Source">{detail.raw_path ? escapePathLabel(detail.raw_path) : "Not linked"}</DetailRow>
-        <DetailRow label="Source file">{rawName || "Unknown"}</DetailRow>
-      </section>
-
-      <section className="mt-4 border-t border-border pt-3">
-        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-muted">Metadata</div>
-        <DetailRow label="Dimensions">{dimensions}</DetailRow>
-        <DetailRow label="File size">{fileSize}</DetailRow>
-        <DetailRow label="Camera">{rawMeta.camera_model || exportMeta.camera_model || "Unknown"}</DetailRow>
-        <DetailRow label="Lens">{rawMeta.lens_model || "Unknown"}</DetailRow>
-      </section>
-
-      <section className="mt-4 border-t border-border pt-3">
-        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-muted">Dates</div>
-        <DetailRow label="Imported">{formatTimestamp(detail.imported_at || exportMeta.imported_at)}</DetailRow>
-        <DetailRow label="Captured">{formatTimestamp(rawMeta.capture_time || exportMeta.capture_time)}</DetailRow>
-        <DetailRow label="Modified">{formatTimestamp(exportMeta.modified_time || detail.updated_at)}</DetailRow>
-      </section>
     </aside>
   );
 }

@@ -40,16 +40,16 @@ function resolveCatalogPath() {
   return scratchCatalogPath;
 }
 
-const catalogPath = resolveCatalogPath();
+let currentCatalogPath = resolveCatalogPath();
 
 function prepareCatalogPath() {
-  fs.mkdirSync(catalogPath, { recursive: true });
+  fs.mkdirSync(currentCatalogPath, { recursive: true });
 }
 
 function workspaceInfo() {
   return {
     rootDir,
-    catalogPath,
+    catalogPath: currentCatalogPath,
     scratchCatalogPath,
     reviewCatalogPath,
     sidecarSrc,
@@ -116,8 +116,34 @@ function callSidecarJson(command) {
   return payload ? JSON.parse(payload) : null;
 }
 
+function callSidecarAsync(command) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    const errChunks = [];
+    const child = spawn("python3", buildSidecarArgs(command), {
+      cwd: rootDir,
+      env: { ...process.env, PYTHONPATH: sidecarSrc },
+    });
+    child.stdout.on("data", (data) => chunks.push(data));
+    child.stderr.on("data", (data) => errChunks.push(data));
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(Buffer.concat(errChunks).toString() || "sidecar command failed"));
+        return;
+      }
+      resolve(Buffer.concat(chunks).toString().trim());
+    });
+    child.on("error", reject);
+  });
+}
+
+async function callSidecarJsonAsync(command) {
+  const payload = await callSidecarAsync(command);
+  return payload ? JSON.parse(payload) : null;
+}
+
 function buildSidecarArgs(command) {
-  return ["-m", "media_workspace", "--catalog", catalogPath, ...command];
+  return ["-m", "media_workspace", "--catalog", currentCatalogPath, ...command];
 }
 
 function spawnDetachedSidecar(command) {
@@ -385,7 +411,8 @@ ipcMain.handle("workspace:create-catalog", async () => {
 });
 
 ipcMain.handle("workspace:switch-catalog", (_event, nextCatalogPath) => {
-  restartDesktop(nextCatalogPath || null);
+  currentCatalogPath = normalizeCatalogPath(nextCatalogPath || scratchCatalogPath) || scratchCatalogPath;
+  prepareCatalogPath();
   return true;
 });
 
@@ -406,8 +433,8 @@ ipcMain.handle("workspace:pending", () => {
   return payload ? JSON.parse(payload) : [];
 });
 
-ipcMain.handle("workspace:browse", (_event, options) => {
-  const payload = callSidecar([
+ipcMain.handle("workspace:browse", async (_event, options) => {
+  return await callSidecarJsonAsync([
     "browse-exports",
     "--status",
     options.status,
@@ -415,13 +442,11 @@ ipcMain.handle("workspace:browse", (_event, options) => {
     String(options.limit),
     "--offset",
     String(options.offset),
-  ]);
-  return payload ? JSON.parse(payload) : [];
+  ]) || [];
 });
 
-ipcMain.handle("workspace:detail", (_event, exportPath) => {
-  const payload = callSidecar(["asset-detail", "--export-path", exportPath]);
-  return payload ? JSON.parse(payload) : null;
+ipcMain.handle("workspace:detail", async (_event, exportPath) => {
+  return await callSidecarJsonAsync(["asset-detail", "--export-path", exportPath]);
 });
 
 ipcMain.handle("workspace:reveal", (_event, targetPath) => {
@@ -439,7 +464,7 @@ app.whenReady().then(() => {
     const raw = request.url.slice("media://".length);
     const filePath = raw.split("/").map((seg) => decodeURIComponent(seg)).join(path.sep);
     const resolved = path.resolve(filePath);
-    const inCatalog = resolved.startsWith(catalogPath + path.sep);
+    const inCatalog = resolved.startsWith(currentCatalogPath + path.sep);
     if (!inCatalog) {
       return new Response("forbidden", { status: 403 });
     }
