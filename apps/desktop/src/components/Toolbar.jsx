@@ -165,14 +165,14 @@ export default function Toolbar({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search"
-          className="h-8 w-44 rounded-md border border-transparent bg-panel py-0 pl-7 pr-2 text-[12px] text-text outline-none placeholder:text-muted2 focus:border-accent/50"
+          className="h-8 w-44 rounded-md border border-border/70 bg-app py-0 pl-7 pr-2 text-[12px] text-text outline-none placeholder:text-muted2 focus:border-accent/50"
         />
       </label>
 
       <select
         value={sort}
         onChange={(e) => setSort(e.target.value)}
-        className="ml-1 h-8 cursor-pointer rounded-md border border-transparent bg-panel px-2 py-0 text-[12px] text-text outline-none hover:border-border"
+        className="ml-1 h-8 cursor-pointer rounded-md border border-border/70 bg-app px-2 py-0 text-[12px] text-text outline-none hover:border-border focus:border-accent/50"
       >
         <option value="name-asc">Name A-Z</option>
         <option value="name-desc">Name Z-A</option>

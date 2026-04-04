@@ -9,7 +9,7 @@ export default function Sidebar({ info, summary, status, setStatus }) {
   if (Number(summary?.export_assets ?? 0)) rootSummary.push(`${summary.export_assets} assets`);
   if (summary?.updated_at) rootSummary.push(`updated ${formatTimestamp(summary.updated_at)}`);
   return (
-    <aside className="flex h-full flex-col overflow-y-auto bg-sidebar px-3 py-3">
+    <aside className="flex h-full flex-col overflow-y-auto bg-chrome px-3 py-3">
       <div className="mb-5 px-1">
         <div className="text-[13px] font-semibold tracking-[0.01em] text-text">{baseName(info?.catalogPath || "Untitled Catalog")}</div>
         <div className="mt-1 text-[11px] text-muted2">

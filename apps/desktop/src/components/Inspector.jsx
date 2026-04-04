@@ -41,7 +41,7 @@ export default function Inspector({ detail }) {
   return (
     <aside className="flex h-full flex-col overflow-hidden bg-chrome">
       <div className="flex-1 overflow-y-auto px-3 py-3 pb-24">
-        <div className="relative mb-4 overflow-hidden rounded-lg bg-panel">
+        <div className="relative mb-4 overflow-hidden rounded-lg bg-app">
           {previewPath ? (
             <img src={localFileUrl(previewPath)} alt={detail.stem} className="block h-auto w-full object-contain" draggable={false} />
           ) : (
@@ -89,7 +89,7 @@ export default function Inspector({ detail }) {
           </button>
           <button
             type="button"
-            className="rounded-md bg-panel px-3 py-2 text-[12px] font-medium text-muted transition-colors hover:bg-hover hover:text-text disabled:cursor-default disabled:opacity-40"
+            className="rounded-md border border-border/70 bg-app px-3 py-2 text-[12px] font-medium text-muted transition-colors hover:bg-hover hover:text-text disabled:cursor-default disabled:opacity-40"
             onClick={() => void window.mediaWorkspace?.revealPath?.(detail.raw_path)}
             disabled={!detail.raw_path}
           >

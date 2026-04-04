@@ -10,11 +10,14 @@ const OVERSCAN_PX = 800;
 
 function CardContent({ item, selected, onSelect, width, height, fit, containerRef }) {
   const title = fileName(item.export_path) || item.stem;
+  const isJustified = fit === "contain";
+  const compactCaption = isJustified;
+
   return (
     <button
       type="button"
       onClick={() => onSelect(item.export_path)}
-      className="group absolute text-left"
+      className="group absolute text-left focus:outline-none"
       style={{
         width: `${width}px`,
         height: `${height + CAPTION_HEIGHT}px`,
@@ -23,10 +26,10 @@ function CardContent({ item, selected, onSelect, width, height, fit, containerRe
     >
       <div
         className={[
-          "relative overflow-hidden rounded-md bg-panel/35 transition-all duration-150",
+          "relative overflow-hidden rounded-md transition-all duration-150",
           selected
             ? "ring-2 ring-accent shadow-[0_0_0_1px_rgba(0,0,0,0.12)]"
-            : "ring-1 ring-transparent hover:bg-panel/55 hover:ring-border/40",
+            : "ring-1 ring-transparent",
         ].join(" ")}
         style={{ height: `${height}px` }}
       >
@@ -42,8 +45,18 @@ function CardContent({ item, selected, onSelect, width, height, fit, containerRe
         )}
       </div>
       <div className="px-0.5 pt-1.5">
-        <div className="line-clamp-2-custom break-all text-[11px] leading-[1.3] text-text">{title}</div>
-        <div className="mt-0.5 text-[10px] leading-[1.3] text-muted2">{galleryInfoLabel(item)}</div>
+        <div
+          className={[
+            compactCaption ? "truncate" : "line-clamp-2-custom break-words",
+            "min-w-0 text-[11px] leading-[1.3]",
+            selected ? "text-text" : "text-text/92",
+          ].join(" ")}
+        >
+          {title}
+        </div>
+        <div className={`mt-0.5 truncate text-[10px] leading-[1.3] ${selected ? "text-muted" : "text-muted2"}`}>
+          {galleryInfoLabel(item)}
+        </div>
       </div>
     </button>
   );

@@ -39,7 +39,7 @@ export default function App() {
           setHistoryIndex(nextIndex);
           workspace.setStatus(next);
           void workspace.refreshAll({ nextStatus: next });
-        }} /> : <div className="bg-panel" />}
+        }} /> : <div className="bg-chrome" />}
 
         <section className="flex min-w-0 min-h-0 flex-col overflow-hidden bg-app">
           <Toolbar
