@@ -22,9 +22,7 @@ export default function App() {
   const layoutStyle = {
     gridTemplateColumns: [
       showSidebar ? `${workspace.sidebarWidth}px` : "0px",
-      showSidebar ? "1px" : "0px",
       "minmax(0, 1fr)",
-      showInspector ? "1px" : "0px",
       showInspector ? `${workspace.inspectorWidth}px` : "0px",
     ].join(" "),
     gridTemplateRows: "minmax(0, 1fr)",
@@ -32,7 +30,7 @@ export default function App() {
 
   return (
     <div className="h-full overflow-hidden bg-app text-text">
-      <div className="grid h-full min-w-0 overflow-hidden" style={layoutStyle}>
+      <div className="relative grid h-full min-w-0 overflow-hidden" style={layoutStyle}>
         {showSidebar ? <Sidebar info={workspace.info} summary={workspace.summary} status={workspace.status} setStatus={(next) => {
           const baseHistory = history.slice(0, historyIndex + 1);
           const nextHistory = baseHistory[baseHistory.length - 1] === next ? baseHistory : [...baseHistory, next];
@@ -42,12 +40,6 @@ export default function App() {
           workspace.setStatus(next);
           void workspace.refreshAll({ nextStatus: next });
         }} /> : <div className="bg-panel" />}
-
-        <div
-          data-value={workspace.sidebarWidth}
-          onMouseDown={resizeSidebar}
-          className={`w-px cursor-col-resize bg-border transition-colors hover:bg-accent/40 ${showSidebar ? "block" : "hidden"}`}
-        />
 
         <section className="flex min-w-0 min-h-0 flex-col overflow-hidden bg-app">
           <Toolbar
@@ -100,13 +92,25 @@ export default function App() {
           </div>
         </section>
 
-        <div
-          data-value={-workspace.inspectorWidth}
-          onMouseDown={resizeInspector}
-          className={`w-px cursor-col-resize bg-border transition-colors hover:bg-accent/40 ${showInspector ? "block" : "hidden"}`}
-        />
+        {showInspector ? <Inspector detail={workspace.detail} /> : <div className="bg-chrome" />}
 
-        {showInspector ? <Inspector detail={workspace.detail} /> : <div className="border-l border-border bg-panel" />}
+        {showSidebar ? (
+          <div
+            data-value={workspace.sidebarWidth}
+            onMouseDown={resizeSidebar}
+            className="absolute inset-y-0 z-20 w-2 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-border/70"
+            style={{ left: `${workspace.sidebarWidth}px` }}
+          />
+        ) : null}
+
+        {showInspector ? (
+          <div
+            data-value={-workspace.inspectorWidth}
+            onMouseDown={resizeInspector}
+            className="absolute inset-y-0 z-20 w-2 translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-border/70"
+            style={{ right: `${workspace.inspectorWidth}px` }}
+          />
+        ) : null}
       </div>
 
       <ImportOverlay overlay={workspace.activeOverlay} />

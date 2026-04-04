@@ -5,10 +5,15 @@ module.exports = {
     extend: {
       colors: {
         app: "rgb(var(--app-bg) / <alpha-value>)",
+        chrome: "rgb(var(--chrome-bg) / <alpha-value>)",
+        sidebar: "rgb(var(--sidebar-bg) / <alpha-value>)",
         panel: "rgb(var(--panel-bg) / <alpha-value>)",
         panel2: "rgb(var(--panel-bg-2) / <alpha-value>)",
+        hover: "rgb(var(--hover-bg) / <alpha-value>)",
+        selected: "rgb(var(--selected-bg) / <alpha-value>)",
         border: "rgb(var(--border-color) / <alpha-value>)",
         muted: "rgb(var(--muted-text) / <alpha-value>)",
+        muted2: "rgb(var(--muted-text-2) / <alpha-value>)",
         text: "rgb(var(--text-color) / <alpha-value>)",
         accent: "rgb(var(--accent-color) / <alpha-value>)",
         accentSoft: "rgb(var(--accent-soft) / <alpha-value>)",

@@ -7,7 +7,7 @@ const SIDEBAR_WIDTH_STORAGE_KEY = "framebase-sidebar-width";
 const INSPECTOR_WIDTH_STORAGE_KEY = "framebase-inspector-width";
 
 export default function useWorkspace() {
-  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_STORAGE_KEY) || "light");
+  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_STORAGE_KEY) || "dark");
   const [sidebarWidth, setSidebarWidth] = useState(() => Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) || 240));
   const [inspectorWidth, setInspectorWidth] = useState(() =>
     Number(localStorage.getItem(INSPECTOR_WIDTH_STORAGE_KEY) || 300),

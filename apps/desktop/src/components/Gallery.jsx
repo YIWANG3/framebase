@@ -14,7 +14,7 @@ function CardContent({ item, selected, onSelect, width, height, fit, containerRe
     <button
       type="button"
       onClick={() => onSelect(item.export_path)}
-      className="group absolute text-center"
+      className="group absolute text-left"
       style={{
         width: `${width}px`,
         height: `${height + CAPTION_HEIGHT}px`,
@@ -23,10 +23,10 @@ function CardContent({ item, selected, onSelect, width, height, fit, containerRe
     >
       <div
         className={[
-          "relative overflow-hidden rounded bg-panel2 transition-shadow",
+          "relative overflow-hidden rounded-md bg-panel/35 transition-all duration-150",
           selected
-            ? "ring-2 ring-accent ring-offset-1 ring-offset-app"
-            : "ring-1 ring-transparent hover:ring-muted/40",
+            ? "ring-2 ring-accent shadow-[0_0_0_1px_rgba(0,0,0,0.12)]"
+            : "ring-1 ring-transparent hover:bg-panel/55 hover:ring-border/40",
         ].join(" ")}
         style={{ height: `${height}px` }}
       >
@@ -43,7 +43,7 @@ function CardContent({ item, selected, onSelect, width, height, fit, containerRe
       </div>
       <div className="px-0.5 pt-1.5">
         <div className="line-clamp-2-custom break-all text-[11px] leading-[1.3] text-text">{title}</div>
-        <div className="mt-0.5 text-[10px] leading-[1.3] text-muted">{galleryInfoLabel(item)}</div>
+        <div className="mt-0.5 text-[10px] leading-[1.3] text-muted2">{galleryInfoLabel(item)}</div>
       </div>
     </button>
   );
@@ -225,7 +225,7 @@ export default function Gallery({
   const fit = displayMode === "justified" ? "contain" : "cover";
 
   return (
-    <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-auto px-3 py-3">
+    <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-auto bg-app px-3 py-3">
       <div className="relative" style={{ height: `${totalHeight}px` }}>
         {visibleItems.map((entry) => {
           const item = entry.item;

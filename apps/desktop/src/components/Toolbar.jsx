@@ -8,6 +8,11 @@ import {
   LayoutGrid,
   LayoutDashboard,
   Columns2,
+  FolderPlus,
+  ImagePlus,
+  Play,
+  Sparkles,
+  Images,
 } from "lucide-react";
 
 const DISPLAY_MODES = [
@@ -16,12 +21,30 @@ const DISPLAY_MODES = [
   { key: "waterfall", icon: Columns2, tip: "Waterfall" },
 ];
 
+const MENU_SECTIONS = [
+  {
+    label: "Library",
+    items: [
+      { label: "Add Processed Media…", icon: ImagePlus, action: "processed" },
+      { label: "Add Sources…", icon: FolderPlus, action: "sources" },
+    ],
+  },
+  {
+    label: "Tasks",
+    items: [
+      { label: "Run Import Pipeline", icon: Play, action: "import" },
+      { label: "Run Enrichment", icon: Sparkles, action: "enrichment" },
+      { label: "Generate Previews", icon: Images, action: "previews" },
+    ],
+  },
+];
+
 function IconButton({ children, className = "", ...props }) {
   return (
     <button
       type="button"
       className={[
-        "flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-muted transition-colors hover:bg-panel2 hover:text-text disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent",
+        "flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-text disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent",
         className,
       ].join(" ")}
       {...props}
@@ -53,9 +76,16 @@ export default function Toolbar({
   setThumbSize,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const actionMap = {
+    processed: onAddProcessed,
+    sources: onAddSources,
+    import: onRunImport,
+    enrichment: onRunEnrichment,
+    previews: onRunPreviews,
+  };
 
   return (
-    <div className="flex h-10 items-center gap-0.5 border-b border-border bg-panel px-2">
+    <div className="flex h-11 items-center gap-1 bg-chrome px-2.5">
       <div className="relative">
         <IconButton onClick={() => setMenuOpen((c) => !c)}>
           <Plus className="h-4 w-4 stroke-[1.8]" />
@@ -63,32 +93,32 @@ export default function Toolbar({
         {menuOpen ? (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-            <div className="absolute top-full z-20 mt-[14px] min-w-[220px] rounded-lg border border-border bg-panel p-1 shadow-overlay">
-              {[
-                ["Add Processed Media…", onAddProcessed],
-                ["Add Sources…", onAddSources],
-                ["Run Import Pipeline", onRunImport],
-                ["Run Enrichment", onRunEnrichment],
-                ["Generate Previews", onRunPreviews],
-              ].map(([label, handler]) => (
-                <button
-                  key={label}
-                  type="button"
-                  className="block w-full cursor-pointer rounded-md px-3 py-1.5 text-left text-[13px] text-text transition-colors hover:bg-panel2"
-                  onClick={async () => {
-                    setMenuOpen(false);
-                    await handler();
-                  }}
-                >
-                  {label}
-                </button>
+            <div className="absolute top-full z-20 mt-2.5 w-[248px] rounded-xl border border-border bg-chrome/95 p-1.5 shadow-overlay backdrop-blur-sm">
+              {MENU_SECTIONS.map((section, sectionIndex) => (
+                <div key={section.label} className={sectionIndex > 0 ? "mt-1 border-t border-border/80 pt-1.5" : ""}>
+                  <div className="px-2.5 pb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted2">
+                    {section.label}
+                  </div>
+                  {section.items.map(({ label, icon: Icon, action }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium text-text transition-colors hover:bg-hover"
+                      onClick={async () => {
+                        setMenuOpen(false);
+                        await actionMap[action]?.();
+                      }}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0 text-muted" />
+                      <span className="min-w-0 flex-1 truncate">{label}</span>
+                    </button>
+                  ))}
+                </div>
               ))}
             </div>
           </>
         ) : null}
       </div>
-
-      <div className="mx-0.5 h-4 w-px bg-border" />
 
       <IconButton disabled={!canGoBack} onClick={onBack}>
         <ChevronLeft className="h-4 w-4 stroke-[1.8]" />
@@ -98,11 +128,11 @@ export default function Toolbar({
       </IconButton>
 
       <div className="ml-2 mr-2 min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium text-text">{title}</div>
+        <div className="truncate text-[13px] font-medium tracking-[0.01em] text-text">{title}</div>
       </div>
 
-      <div className="flex h-7 items-center gap-1.5 text-muted">
-        <span className="relative -top-px flex h-7 w-4 items-center justify-center text-[13px] leading-none">−</span>
+      <div className="flex h-8 items-center gap-1.5 text-muted2">
+        <span className="relative -top-px flex h-8 w-4 items-center justify-center text-[13px] leading-none">−</span>
         <input
           type="range"
           min="120"
@@ -113,17 +143,15 @@ export default function Toolbar({
           className="w-16"
           aria-label="Thumbnail size"
         />
-        <span className="relative -top-px flex h-7 w-4 items-center justify-center text-[13px] leading-none">+</span>
+        <span className="relative -top-px flex h-8 w-4 items-center justify-center text-[13px] leading-none">+</span>
       </div>
 
-      <div className="mx-1 h-4 w-px bg-border" />
-
-      <div className="flex items-center gap-px">
+      <div className="flex items-center gap-1">
         {DISPLAY_MODES.map(({ key, icon: Icon, tip }) => (
           <IconButton
             key={key}
             onClick={() => setDisplayMode(key)}
-            className={displayMode === key ? "text-text bg-panel2" : ""}
+            className={displayMode === key ? "bg-selected text-accent" : ""}
             title={tip}
           >
             <Icon className="h-3.5 w-3.5 stroke-[1.6]" />
@@ -131,22 +159,20 @@ export default function Toolbar({
         ))}
       </div>
 
-      <div className="mx-1 h-4 w-px bg-border" />
-
       <label className="relative">
         <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search"
-          className="w-40 rounded-md border border-transparent bg-panel2 py-1 pl-7 pr-2 text-[12px] text-text outline-none placeholder:text-muted focus:border-accent/50"
+          className="h-8 w-44 rounded-md border border-transparent bg-panel py-0 pl-7 pr-2 text-[12px] text-text outline-none placeholder:text-muted2 focus:border-accent/50"
         />
       </label>
 
       <select
         value={sort}
         onChange={(e) => setSort(e.target.value)}
-        className="ml-1 cursor-pointer rounded-md border border-transparent bg-panel2 px-2 py-1 text-[12px] text-text outline-none hover:border-border"
+        className="ml-1 h-8 cursor-pointer rounded-md border border-transparent bg-panel px-2 py-0 text-[12px] text-text outline-none hover:border-border"
       >
         <option value="name-asc">Name A-Z</option>
         <option value="name-desc">Name Z-A</option>

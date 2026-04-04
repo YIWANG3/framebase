@@ -3,35 +3,45 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
-  --app-bg: 241 241 239;
-  --panel-bg: 249 249 247;
-  --panel-bg-2: 255 255 255;
-  --border-color: 224 222 218;
-  --text-color: 36 36 36;
-  --muted-text: 130 130 130;
-  --accent-color: 56 116 220;
-  --accent-soft: 225 236 255;
-  --success-color: 69 138 89;
-  --warn-color: 180 129 40;
-  --error-color: 193 85 74;
+  color-scheme: dark;
+  --app-bg: 16 16 16;
+  --chrome-bg: 21 21 21;
+  --sidebar-bg: 24 24 24;
+  --panel-bg: 29 29 29;
+  --panel-bg-2: 37 37 37;
+  --hover-bg: 43 43 43;
+  --selected-bg: 34 31 27;
+  --border-color: 38 38 38;
+  --text-color: 242 242 242;
+  --muted-text: 176 176 176;
+  --muted-text-2: 125 125 125;
+  --accent-color: 196 148 82;
+  --accent-soft: 58 46 29;
+  --success-color: 142 187 139;
+  --warn-color: 216 188 135;
+  --error-color: 201 126 104;
   --sidebar-width: 220px;
   --inspector-width: 280px;
 }
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --app-bg: 30 30 32;
-  --panel-bg: 36 36 38;
-  --panel-bg-2: 42 42 46;
-  --border-color: 52 52 56;
-  --text-color: 230 230 228;
-  --muted-text: 128 128 134;
-  --accent-color: 76 136 255;
-  --accent-soft: 32 52 88;
-  --success-color: 92 185 117;
-  --warn-color: 209 168 86;
-  --error-color: 219 107 96;
+:root[data-theme="light"] {
+  color-scheme: light;
+  --app-bg: 242 240 236;
+  --chrome-bg: 236 232 225;
+  --sidebar-bg: 231 227 220;
+  --panel-bg: 251 248 242;
+  --panel-bg-2: 255 252 247;
+  --hover-bg: 228 222 212;
+  --selected-bg: 222 214 203;
+  --border-color: 216 208 197;
+  --text-color: 26 26 26;
+  --muted-text: 84 80 74;
+  --muted-text-2: 138 131 120;
+  --accent-color: 184 131 63;
+  --accent-soft: 238 228 213;
+  --success-color: 85 122 82;
+  --warn-color: 154 122 62;
+  --error-color: 161 93 73;
 }
 
 html,
@@ -43,6 +53,8 @@ body,
 body {
   margin: 0;
   overflow: hidden;
+  background: rgb(var(--app-bg));
+  color: rgb(var(--text-color));
   font-family:
     -apple-system,
     BlinkMacSystemFont,
@@ -91,7 +103,7 @@ input[type="range"] {
 input[type="range"]::-webkit-slider-runnable-track {
   height: 2px;
   border-radius: 999px;
-  background: rgba(128, 128, 128, 0.3);
+  background: rgb(var(--border-color));
 }
 
 input[type="range"]::-webkit-slider-thumb {
@@ -103,7 +115,7 @@ input[type="range"]::-webkit-slider-thumb {
   background: rgb(var(--text-color));
   border: none;
   margin-top: -5px;
-  opacity: 0.6;
+  opacity: 0.82;
 }
 
 input[type="range"]::-webkit-slider-thumb:hover {
@@ -116,14 +128,14 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.25);
+  background: rgba(var(--muted-text-2), 0.32);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(128, 128, 128, 0.4);
+  background: rgba(var(--muted-text), 0.45);
   background-clip: padding-box;
 }
 

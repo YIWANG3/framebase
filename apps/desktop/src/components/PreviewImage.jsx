@@ -38,7 +38,7 @@ export default function PreviewImage({
 
   return (
     <div ref={setContainer} className="relative h-full w-full overflow-hidden">
-      <div className="absolute inset-0 animate-pulse bg-[rgba(255,255,255,0.05)] dark:bg-[rgba(255,255,255,0.04)]" />
+      <div className="absolute inset-0 animate-pulse bg-[rgba(255,255,255,0.04)] dark:bg-[rgba(255,255,255,0.03)]" />
       {!src ? (
         <div className="absolute inset-0 flex items-center justify-center text-[11px] text-muted">{placeholderLabel}</div>
       ) : null}
