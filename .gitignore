@@ -8,5 +8,12 @@ dist/
 build/
 data/
 *.sqlite3
+tmp/
+apps/desktop/.agents/
+apps/desktop/.claude/
+apps/desktop/.trae/
+apps/desktop/.windsurf/
+apps/desktop/skills/
+apps/desktop/skills-lock.json
 
 RESOURCES

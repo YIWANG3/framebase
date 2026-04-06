@@ -29,7 +29,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-full overflow-hidden bg-app text-text">
+    <div className="noise-overlay h-full overflow-hidden bg-app text-text">
       <div className="relative grid h-full min-w-0 overflow-hidden" style={layoutStyle}>
         {showSidebar ? <Sidebar info={workspace.info} summary={workspace.summary} status={workspace.status} setStatus={(next) => {
           const baseHistory = history.slice(0, historyIndex + 1);
@@ -98,7 +98,7 @@ export default function App() {
           <div
             data-value={workspace.sidebarWidth}
             onMouseDown={resizeSidebar}
-            className="absolute inset-y-0 z-20 w-2 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-border/70"
+            className="absolute inset-y-0 z-20 w-3 -translate-x-1/2 cursor-col-resize transition-colors before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent hover:before:bg-border"
             style={{ left: `${workspace.sidebarWidth}px` }}
           />
         ) : null}
@@ -107,7 +107,7 @@ export default function App() {
           <div
             data-value={-workspace.inspectorWidth}
             onMouseDown={resizeInspector}
-            className="absolute inset-y-0 z-20 w-2 translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-border/70"
+            className="absolute inset-y-0 z-20 w-3 translate-x-1/2 cursor-col-resize transition-colors before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent hover:before:bg-border"
             style={{ right: `${workspace.inspectorWidth}px` }}
           />
         ) : null}

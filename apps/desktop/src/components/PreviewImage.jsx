@@ -49,7 +49,7 @@ export default function PreviewImage({
           loading="lazy"
           decoding="async"
           className={[
-            "absolute inset-0 h-full w-full transition-opacity duration-200",
+            "absolute inset-0 h-full w-full transition-[opacity,transform] duration-300 ease-out group-hover:scale-[1.03]",
             loaded ? "opacity-100" : "opacity-0",
             fit === "contain" ? "object-contain" : "object-cover",
             className || "",

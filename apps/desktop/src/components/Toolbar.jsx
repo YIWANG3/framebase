@@ -85,15 +85,15 @@ export default function Toolbar({
   };
 
   return (
-    <div className="flex h-11 items-center gap-1 bg-chrome px-2.5">
+    <div className="relative z-50 flex h-11 items-center gap-1 border-b border-border/50 bg-chrome px-2.5">
       <div className="relative">
         <IconButton onClick={() => setMenuOpen((c) => !c)}>
           <Plus className="h-4 w-4 stroke-[1.8]" />
         </IconButton>
         {menuOpen ? (
           <>
-            <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-            <div className="absolute top-full z-20 mt-2.5 w-[248px] rounded-xl border border-border bg-chrome/95 p-1.5 shadow-overlay backdrop-blur-sm">
+            <div className="fixed inset-0 z-[100]" onClick={() => setMenuOpen(false)} />
+            <div className="absolute top-full z-[101] mt-2.5 w-[248px] rounded-xl border border-border/60 bg-chrome p-1.5 shadow-overlay">
               {MENU_SECTIONS.map((section, sectionIndex) => (
                 <div key={section.label} className={sectionIndex > 0 ? "mt-1 border-t border-border/80 pt-1.5" : ""}>
                   <div className="px-2.5 pb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted2">
@@ -128,7 +128,7 @@ export default function Toolbar({
       </IconButton>
 
       <div className="ml-2 mr-2 min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium tracking-[0.01em] text-text">{title}</div>
+        <div className="truncate text-[13px] font-semibold tracking-[-0.01em] text-text">{title}</div>
       </div>
 
       <div className="flex h-8 items-center gap-1.5 text-muted2">

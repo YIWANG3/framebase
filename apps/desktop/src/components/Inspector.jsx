@@ -11,8 +11,8 @@ function DetailRow({ label, children }) {
 
 function SectionHeader({ children }) {
   return (
-    <div className="mt-5">
-      <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted2">{children}</div>
+    <div className="mt-4 border-t border-border/40 pt-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted2">{children}</div>
     </div>
   );
 }
@@ -21,8 +21,10 @@ export default function Inspector({ detail }) {
   if (!detail) {
     return (
       <aside className="flex h-full items-center justify-center overflow-y-auto bg-chrome px-4">
-        <div className="text-center text-[12px] text-muted">
-          Select an asset to view details
+        <div className="text-center">
+          <div className="mx-auto mb-2 h-px w-10 bg-border" />
+          <div className="text-[12px] text-muted">Select an asset</div>
+          <div className="mx-auto mt-2 h-px w-10 bg-border" />
         </div>
       </aside>
     );
@@ -39,8 +41,8 @@ export default function Inspector({ detail }) {
   const matched = statusLabel(detail.match_status);
 
   return (
-    <aside className="flex h-full flex-col overflow-hidden bg-chrome">
-      <div className="flex-1 overflow-y-auto px-3 py-3 pb-24">
+    <aside className="flex h-full flex-col overflow-hidden border-l border-border/40 bg-chrome">
+      <div className="flex-1 overflow-y-auto px-3 py-3">
         <div className="relative mb-4 overflow-hidden rounded-lg bg-app">
           {previewPath ? (
             <img src={localFileUrl(previewPath)} alt={detail.stem} className="block h-auto w-full object-contain" draggable={false} />
@@ -63,8 +65,28 @@ export default function Inspector({ detail }) {
           <DetailRow label="Type">{formatValue}</DetailRow>
 
           <SectionHeader>Source</SectionHeader>
-          <DetailRow label="Asset">{escapePathLabel(detail.export_path)}</DetailRow>
-          <DetailRow label="Source">{detail.raw_path ? escapePathLabel(detail.raw_path) : "Not linked"}</DetailRow>
+          <DetailRow label="Asset">
+            <button
+              type="button"
+              className="cursor-pointer text-right text-accent underline decoration-accent/30 underline-offset-2 transition-colors hover:text-accent hover:decoration-accent/60"
+              onClick={() => void window.mediaWorkspace?.revealPath?.(detail.export_path)}
+              title="Reveal in Finder"
+            >
+              {escapePathLabel(detail.export_path)}
+            </button>
+          </DetailRow>
+          <DetailRow label="Source">
+            {detail.raw_path ? (
+              <button
+                type="button"
+                className="cursor-pointer text-right text-accent underline decoration-accent/30 underline-offset-2 transition-colors hover:text-accent hover:decoration-accent/60"
+                onClick={() => void window.mediaWorkspace?.revealPath?.(detail.raw_path)}
+                title="Reveal in Finder"
+              >
+                {escapePathLabel(detail.raw_path)}
+              </button>
+            ) : "Not linked"}
+          </DetailRow>
           <DetailRow label="Source file">{rawName || "—"}</DetailRow>
 
           <SectionHeader>Camera</SectionHeader>
@@ -78,25 +100,6 @@ export default function Inspector({ detail }) {
         </div>
       </div>
 
-      <div className="bg-chrome/95 px-3 py-3 backdrop-blur">
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            className="rounded-md bg-selected px-3 py-2 text-[12px] font-medium text-text transition-colors hover:bg-hover"
-            onClick={() => void window.mediaWorkspace?.revealPath?.(detail.export_path)}
-          >
-            Reveal Media
-          </button>
-          <button
-            type="button"
-            className="rounded-md border border-border/70 bg-app px-3 py-2 text-[12px] font-medium text-muted transition-colors hover:bg-hover hover:text-text disabled:cursor-default disabled:opacity-40"
-            onClick={() => void window.mediaWorkspace?.revealPath?.(detail.raw_path)}
-            disabled={!detail.raw_path}
-          >
-            Reveal Source
-          </button>
-        </div>
-      </div>
     </aside>
   );
 }

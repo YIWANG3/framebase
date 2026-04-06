@@ -4,19 +4,20 @@
 
 :root {
   color-scheme: dark;
-  --app-bg: 16 16 16;
-  --chrome-bg: 21 21 21;
-  --sidebar-bg: 24 24 24;
-  --panel-bg: 29 29 29;
-  --panel-bg-2: 37 37 37;
-  --hover-bg: 43 43 43;
-  --selected-bg: 34 31 27;
-  --border-color: 38 38 38;
-  --text-color: 242 242 242;
-  --muted-text: 176 176 176;
-  --muted-text-2: 125 125 125;
-  --accent-color: 196 148 82;
-  --accent-soft: 58 46 29;
+  --app-bg: 12 12 12;
+  --chrome-bg: 18 18 18;
+  --sidebar-bg: 18 18 18;
+  --panel-bg: 24 24 24;
+  --panel-bg-2: 32 32 32;
+  --hover-bg: 40 40 40;
+  --selected-bg: 30 27 22;
+  --border-color: 32 32 32;
+  --text-color: 240 240 240;
+  --muted-text: 160 160 160;
+  --muted-text-2: 100 100 100;
+  --accent-color: 210 160 90;
+  --accent-soft: 50 40 24;
+  --glow-accent: 210 160 90;
   --success-color: 142 187 139;
   --warn-color: 216 188 135;
   --error-color: 201 126 104;
@@ -26,19 +27,20 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --app-bg: 242 240 236;
-  --chrome-bg: 236 232 225;
-  --sidebar-bg: 231 227 220;
-  --panel-bg: 251 248 242;
-  --panel-bg-2: 255 252 247;
-  --hover-bg: 228 222 212;
-  --selected-bg: 222 214 203;
-  --border-color: 216 208 197;
-  --text-color: 26 26 26;
-  --muted-text: 84 80 74;
-  --muted-text-2: 138 131 120;
-  --accent-color: 184 131 63;
-  --accent-soft: 238 228 213;
+  --app-bg: 245 243 240;
+  --chrome-bg: 238 235 230;
+  --sidebar-bg: 238 235 230;
+  --panel-bg: 250 248 244;
+  --panel-bg-2: 255 253 249;
+  --hover-bg: 230 226 218;
+  --selected-bg: 225 218 208;
+  --border-color: 218 212 202;
+  --text-color: 24 24 24;
+  --muted-text: 90 86 78;
+  --muted-text-2: 140 134 124;
+  --accent-color: 180 128 58;
+  --accent-soft: 240 230 216;
+  --glow-accent: 180 128 58;
   --success-color: 85 122 82;
   --warn-color: 154 122 62;
   --error-color: 161 93 73;
@@ -55,15 +57,9 @@ body {
   overflow: hidden;
   background: rgb(var(--app-bg));
   color: rgb(var(--text-color));
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "SF Pro Text",
-    "Segoe UI",
-    Roboto,
-    "Helvetica Neue",
-    sans-serif;
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
   font-size: 13px;
+  font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -141,6 +137,28 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* === Atmosphere === */
+.noise-overlay::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.018;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+:root[data-theme="light"] .noise-overlay::after {
+  opacity: 0.03;
+}
+
+.accent-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgb(var(--accent-color) / 0.4) 50%, transparent 100%);
 }
 
 select {

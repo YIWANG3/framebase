@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Images } from "lucide-react";
 import { fileName, galleryInfoLabel, buildJustifiedLayout, localFileUrl } from "../utils/format";
 import PreviewImage from "./PreviewImage";
 
@@ -26,10 +26,10 @@ function CardContent({ item, selected, onSelect, width, height, fit, containerRe
     >
       <div
         className={[
-          "relative overflow-hidden rounded-md transition-all duration-150",
+          "relative overflow-hidden rounded-md transition-all duration-200",
           selected
-            ? "ring-2 ring-accent shadow-[0_0_0_1px_rgba(0,0,0,0.12)]"
-            : "ring-1 ring-transparent",
+            ? "ring-2 ring-accent shadow-glow"
+            : "ring-1 ring-border/40 group-hover:ring-accent/40 group-hover:shadow-card-hover",
         ].join(" ")}
         style={{ height: `${height}px` }}
       >
@@ -220,7 +220,14 @@ export default function Gallery({
     );
   }
   if (!items.length) {
-    return <div className="px-6 py-12 text-[13px] text-muted">No assets in this view.</div>;
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-border bg-chrome/50">
+          <Images className="h-6 w-6 text-muted2" />
+        </div>
+        <div className="text-[13px] text-muted">No assets in this view</div>
+      </div>
+    );
   }
 
   const metrics = displayMode === "justified" ? justifiedMetrics
