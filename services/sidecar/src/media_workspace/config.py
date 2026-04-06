@@ -33,7 +33,7 @@ DEFAULT_EXPORT_EXTENSIONS = {
 
 @dataclass(slots=True)
 class Thresholds:
-    auto_bind: float = 0.85
+    auto_bind: float = 0.90
     manual_review: float = 0.7
 
 
