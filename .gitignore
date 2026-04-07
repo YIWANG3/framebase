@@ -3,11 +3,15 @@ __pycache__/
 .DS_Store
 .pytest_cache/
 .mypy_cache/
+.claude/
 node_modules/
 dist/
 build/
 data/
 *.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.sqlite3-journal
 tmp/
 apps/desktop/.agents/
 apps/desktop/.claude/
@@ -15,5 +19,5 @@ apps/desktop/.trae/
 apps/desktop/.windsurf/
 apps/desktop/skills/
 apps/desktop/skills-lock.json
-
-RESOURCES
+*.mwcatalog/
+RESOURCES/
