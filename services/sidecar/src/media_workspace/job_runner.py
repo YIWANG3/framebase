@@ -110,17 +110,19 @@ def run_import_job(
                     "unchanged": 0,
                     "forced": 0,
                     "processed": 0,
+                    "discovered": 0,
                     "total": 0,
                 }
 
                 def scan_progress(update: dict[str, int | str]) -> None:
                     overall_processed = int(scan_totals["processed"]) + int(update.get("processed", 0) or 0)
-                    overall_discovered = int(scan_totals["total"]) + int(update.get("discovered", 0) or 0)
+                    overall_discovered = int(scan_totals["discovered"]) + int(update.get("discovered", 0) or 0)
                     phase_result = {
                         **scan_totals,
                         **update,
                         "processed": overall_processed,
                         "discovered": overall_discovered,
+                        "total": overall_discovered,
                     }
                     update_job(
                         connection,
@@ -146,6 +148,7 @@ def run_import_job(
                     for key in ("indexed", "skipped", "unchanged", "forced", "processed"):
                         scan_totals[key] = int(scan_totals.get(key, 0)) + int(result.get(key, 0))
                     scan_totals["discovered"] = int(scan_totals.get("discovered", 0)) + int(result.get("discovered", 0))
+                    scan_totals["total"] = scan_totals["discovered"]
                     scan_totals["workers"] = result["workers"]
                     scan_totals["fingerprint_mode"] = result["fingerprint_mode"]
                     scan_totals["metadata_profile"] = result["metadata_profile"]

@@ -88,6 +88,18 @@ def _build_tiff(
 def _build_jpeg_with_exif(tiff: bytes, width: int, height: int) -> bytes:
     app1_payload = b"Exif\x00\x00" + tiff
     app1 = b"\xff\xe1" + struct.pack(">H", len(app1_payload) + 2) + app1_payload
+    return _build_jpeg(app1, width=width, height=height)
+
+
+def _build_jpeg_with_xmp(exif_tiff: bytes, xmp: str, width: int, height: int) -> bytes:
+    exif_payload = b"Exif\x00\x00" + exif_tiff
+    exif_segment = b"\xff\xe1" + struct.pack(">H", len(exif_payload) + 2) + exif_payload
+    xmp_payload = b"http://ns.adobe.com/xap/1.0/\x00" + xmp.encode("utf-8")
+    xmp_segment = b"\xff\xe1" + struct.pack(">H", len(xmp_payload) + 2) + xmp_payload
+    return _build_jpeg(exif_segment + xmp_segment, width=width, height=height)
+
+
+def _build_jpeg(app_segments: bytes, width: int, height: int) -> bytes:
     sof0 = (
         b"\xff\xc0"
         + struct.pack(">H", 17)
@@ -96,7 +108,7 @@ def _build_jpeg_with_exif(tiff: bytes, width: int, height: int) -> bytes:
         + struct.pack(">H", width)
         + b"\x03\x01\x11\x00\x02\x11\x00\x03\x11\x00"
     )
-    return b"\xff\xd8" + app1 + sof0 + b"\xff\xd9"
+    return b"\xff\xd8" + app_segments + sof0 + b"\xff\xd9"
 
 
 class MetadataExtractionTest(unittest.TestCase):
@@ -173,6 +185,25 @@ class MetadataExtractionTest(unittest.TestCase):
             self.assertEqual(candidate.width, 5926)
             self.assertEqual(candidate.height, 3870)
 
+    def test_extract_export_candidate_reads_embedded_xmp_rating(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tiff = _build_tiff(
+                ifd0=[(0x0110, 2, "CFV 100C/907X")],
+                exif=[(0x9003, 2, "2026:03:20 10:15:30")],
+            )
+            xmp = """<x:xmpmeta xmlns:x='adobe:ns:meta/' xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>
+<rdf:RDF>
+<rdf:Description xmlns:xmp='http://ns.adobe.com/xap/1.0/' xmp:Rating='5' />
+</rdf:RDF>
+</x:xmpmeta>"""
+            jpeg = _build_jpeg_with_xmp(tiff, xmp, width=5926, height=3870)
+            path = Path(temp_dir) / "B0023524-2.jpg"
+            path.write_bytes(jpeg)
+
+            candidate = extract_export_candidate(path)
+
+            self.assertEqual(candidate.rating, 5)
+
     def test_extract_raw_metadata_reads_embedded_tiff(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             tiff = _build_tiff(
@@ -200,6 +231,7 @@ class MetadataExtractionTest(unittest.TestCase):
             self.assertEqual(metadata.camera_model, "Canon EOS R6m2")
             self.assertEqual(metadata.software, "Adobe Photoshop Lightroom")
             self.assertEqual(metadata.capture_time, "2026-01-11T15:03:52+00:00")
+            self.assertIsNone(metadata.rating)
             self.assertEqual(metadata.iso, 100)
             self.assertEqual(metadata.aperture, 2.8)
             self.assertEqual(metadata.shutter_speed, 1 / 250)

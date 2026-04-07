@@ -16,6 +16,7 @@ class RawMetadata:
     file_size: int
     modified_time: str
     capture_time: str | None
+    rating: int | None
     camera_make: str | None
     camera_model: str | None
     lens_model: str | None
@@ -55,6 +56,7 @@ class ExportCandidate:
     file_size: int
     modified_time: str
     capture_time: str | None
+    rating: int | None
     camera_make: str | None
     camera_model: str | None
     lens_model: str | None

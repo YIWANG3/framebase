@@ -88,6 +88,7 @@ export default function Gallery({
     const update = () => {
       setContainerWidth(element.clientWidth);
       setViewportHeight(element.clientHeight);
+      setScrollTop(element.scrollTop);
     };
     update();
     const observer = new ResizeObserver(update);
@@ -220,7 +221,10 @@ export default function Gallery({
     onLayoutItemsChange?.(layoutItems);
   }, [layoutItems, onLayoutItemsChange]);
 
+  const prevSelectedRef = useRef(selectedExportPath);
   useEffect(() => {
+    if (prevSelectedRef.current === selectedExportPath) return;
+    prevSelectedRef.current = selectedExportPath;
     if (!selectedExportPath || !containerRef.current) return;
     const escaped = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(selectedExportPath) : selectedExportPath.replaceAll('"', '\\"');
     const element = containerRef.current.querySelector(`[data-export-path="${escaped}"]`);

@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import struct
+import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from io import BytesIO
@@ -343,6 +344,30 @@ def _has_metadata_value(value: object) -> bool:
     return True
 
 
+def _extract_xmp_rating(data: bytes) -> int | None:
+    match = re.search(rb"<x:xmpmeta\b.*?</x:xmpmeta>", data, re.DOTALL)
+    if not match:
+        return None
+    chunk = match.group(0)
+    try:
+        root = ET.fromstring(chunk.decode("utf-8", "ignore"))
+    except ET.ParseError:
+        text = chunk.decode("utf-8", "ignore")
+        attr_match = re.search(r'\bxmp:Rating="(-?\d+)"', text)
+        if not attr_match:
+            return None
+        return int(attr_match.group(1))
+
+    for element in root.iter():
+        for attr_name, attr_value in element.attrib.items():
+            if attr_name.endswith("Rating"):
+                try:
+                    return int(attr_value)
+                except ValueError:
+                    continue
+    return None
+
+
 def _parse_tiff_ifd(data: bytes, tiff_base: int, ifd_offset: int, little_endian: bool) -> dict[int, object]:
     if ifd_offset <= 0:
         return {}
@@ -394,6 +419,7 @@ def _extract_tiff_metadata(
     if profile == "matcher":
         return {
             "capture_time": capture_time,
+            "rating": None,
             "camera_make": camera_make,
             "camera_model": camera_model,
             "lens_model": None,
@@ -433,6 +459,7 @@ def _extract_tiff_metadata(
 
     return {
         "capture_time": capture_time,
+        "rating": None,
         "camera_make": camera_make,
         "camera_model": camera_model,
         "lens_model": lens_model,
@@ -477,6 +504,7 @@ def _iter_embedded_tiff_offsets(data: bytes) -> list[int]:
 def _merge_metadata(candidates: list[dict[str, object]]) -> dict[str, object]:
     merged: dict[str, object] = {
         "capture_time": None,
+        "rating": None,
         "camera_make": None,
         "camera_model": None,
         "lens_model": None,
@@ -535,6 +563,11 @@ def _extract_embedded_metadata_with_sample(
                     if profile == "matcher" and metadata.get("camera_model") and metadata.get("capture_time"):
                         break
 
+        if profile == "full":
+            rating = _extract_xmp_rating(data)
+            if rating is not None:
+                candidates.append({"rating": rating})
+
         merged = _merge_metadata(candidates)
         if any(merged.values()) or limit == limits[-1]:
             return merged, bytes(sample)
@@ -567,6 +600,7 @@ def extract_raw_metadata(
         file_size=stat.st_size,
         modified_time=iso_mtime(path, stat),
         capture_time=metadata["capture_time"],
+        rating=metadata["rating"],
         camera_make=metadata["camera_make"],
         camera_model=metadata["camera_model"],
         lens_model=metadata["lens_model"],
@@ -610,6 +644,7 @@ def extract_export_candidate(path: Path, fingerprint_mode: str = "head-tail") ->
         file_size=stat.st_size,
         modified_time=iso_mtime(path, stat),
         capture_time=metadata["capture_time"],
+        rating=metadata["rating"],
         camera_make=metadata["camera_make"],
         camera_model=metadata["camera_model"],
         lens_model=metadata["lens_model"],

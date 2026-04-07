@@ -253,6 +253,7 @@ def list_jobs(connection: sqlite3.Connection, job_type: str | None = None, limit
 def upsert_raw_asset(connection: sqlite3.Connection, metadata: RawMetadata, commit: bool = True) -> None:
     asset_metadata = {
         "capture_time": metadata.capture_time,
+        "rating": metadata.rating,
         "camera_make": metadata.camera_make,
         "camera_model": metadata.camera_model,
         "lens_model": metadata.lens_model,
@@ -377,6 +378,7 @@ def upsert_export_asset(connection: sqlite3.Connection, export: ExportCandidate,
     asset_id = str(existing["asset_id"]) if existing else export.asset_id
     asset_metadata = {
         "capture_time": export.capture_time,
+        "rating": export.rating,
         "camera_make": export.camera_make,
         "camera_model": export.camera_model,
         "lens_model": export.lens_model,

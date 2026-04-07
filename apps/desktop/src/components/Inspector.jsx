@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
-import { fileName, escapePathLabel, formatBytes, formatTimestamp, statusLabel, scoreLabel, localFileUrl, formatShutterSpeed, formatAperture, formatFocalLength, formatISO } from "../utils/format";
+import { fileName, escapePathLabel, formatBytes, formatTimestamp, localFileUrl, formatShutterSpeed, formatAperture, formatFocalLength, formatISO } from "../utils/format";
 
 function DetailRow({ label, children }) {
   return (
@@ -49,7 +49,6 @@ export default function Inspector({ detail }) {
   const formatValue = (detail.export_path || "").split(".").pop()?.toUpperCase() || "Unknown";
   const dimensions = exportMeta.width && exportMeta.height ? `${exportMeta.width} × ${exportMeta.height}` : "Unknown";
   const fileSize = formatBytes(exportMeta.file_size || exportMeta.size_bytes) || "Unknown";
-  const matched = statusLabel(detail.match_status);
 
   const exposureMeta = rawMeta.capture_time ? rawMeta : exportMeta;
   const aperture = formatAperture(exposureMeta.aperture);
@@ -60,7 +59,7 @@ export default function Inspector({ detail }) {
 
   return (
     <aside className="flex h-full flex-col overflow-hidden border-l border-border/40 bg-chrome">
-      <div className="flex-1 overflow-y-auto px-3 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         <div className="relative mb-4 flex h-[200px] items-center justify-center overflow-hidden">
           {previewPath ? (
             <img src={localFileUrl(previewPath)} alt={detail.stem} className="max-h-full max-w-full object-contain" draggable={false} />
@@ -76,8 +75,6 @@ export default function Inspector({ detail }) {
           <h2 className="text-[13px] font-medium leading-tight text-text">{exportName || detail.stem}</h2>
 
           <Section title="Properties">
-            <DetailRow label="Status">{matched}</DetailRow>
-            {detail.score != null ? <DetailRow label="Score">{scoreLabel(detail.score)}</DetailRow> : null}
             <DetailRow label="Dimensions">{dimensions}</DetailRow>
             <DetailRow label="Size">{fileSize}</DetailRow>
             <DetailRow label="Type">{formatValue}</DetailRow>
