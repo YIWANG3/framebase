@@ -86,6 +86,32 @@ export function scoreLabel(score) {
   return Number(score).toFixed(2);
 }
 
+export function formatShutterSpeed(value) {
+  const v = Number(value);
+  if (!v || Number.isNaN(v)) return null;
+  if (v >= 1) return `${v}s`;
+  const denom = Math.round(1 / v);
+  return `1/${denom}s`;
+}
+
+export function formatAperture(value) {
+  const v = Number(value);
+  if (!v || Number.isNaN(v)) return null;
+  return `f/${v % 1 === 0 ? v : v.toFixed(1)}`;
+}
+
+export function formatFocalLength(value) {
+  const v = Number(value);
+  if (!v || Number.isNaN(v)) return null;
+  return `${v % 1 === 0 ? v : v.toFixed(1)} mm`;
+}
+
+export function formatISO(value) {
+  const v = Number(value);
+  if (!v || Number.isNaN(v)) return null;
+  return `ISO ${v}`;
+}
+
 export function filterTitle(status) {
   if (status === "matched") return "Matched";
   if (status === "unmatched") return "Unmatched";

@@ -1,4 +1,6 @@
-import { fileName, escapePathLabel, formatBytes, formatTimestamp, statusLabel, scoreLabel, localFileUrl } from "../utils/format";
+import { useState } from "react";
+import { ChevronRight } from "lucide-react";
+import { fileName, escapePathLabel, formatBytes, formatTimestamp, statusLabel, scoreLabel, localFileUrl, formatShutterSpeed, formatAperture, formatFocalLength, formatISO } from "../utils/format";
 
 function DetailRow({ label, children }) {
   return (
@@ -9,10 +11,19 @@ function DetailRow({ label, children }) {
   );
 }
 
-function SectionHeader({ children }) {
+function Section({ title, defaultOpen = true, children }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="mt-4 border-t border-border/40 pt-3">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted2">{children}</div>
+      <button
+        type="button"
+        className="flex w-full items-center justify-between text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted2">{title}</span>
+        <ChevronRight className={`h-3 w-3 text-muted2 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open ? <div className="mt-1">{children}</div> : null}
     </div>
   );
 }
@@ -40,14 +51,21 @@ export default function Inspector({ detail }) {
   const fileSize = formatBytes(exportMeta.file_size || exportMeta.size_bytes) || "Unknown";
   const matched = statusLabel(detail.match_status);
 
+  const exposureMeta = rawMeta.capture_time ? rawMeta : exportMeta;
+  const aperture = formatAperture(exposureMeta.aperture);
+  const shutter = formatShutterSpeed(exposureMeta.shutter_speed);
+  const iso = formatISO(exposureMeta.iso);
+  const focal = formatFocalLength(exposureMeta.focal_length);
+  const hasExposure = aperture || shutter || iso || focal;
+
   return (
     <aside className="flex h-full flex-col overflow-hidden border-l border-border/40 bg-chrome">
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        <div className="relative mb-4 overflow-hidden rounded-lg bg-app">
+        <div className="relative mb-4 flex h-[200px] items-center justify-center overflow-hidden">
           {previewPath ? (
-            <img src={localFileUrl(previewPath)} alt={detail.stem} className="block h-auto w-full object-contain" draggable={false} />
+            <img src={localFileUrl(previewPath)} alt={detail.stem} className="max-h-full max-w-full object-contain" draggable={false} />
           ) : (
-            <div className="flex min-h-[160px] items-center justify-center text-[12px] text-muted">No preview</div>
+            <div className="flex items-center justify-center text-[12px] text-muted">No preview</div>
           )}
           <span className="absolute left-2 top-2 rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-medium text-white">
             {formatValue}
@@ -57,49 +75,62 @@ export default function Inspector({ detail }) {
         <div className="px-0.5">
           <h2 className="text-[13px] font-medium leading-tight text-text">{exportName || detail.stem}</h2>
 
-          <SectionHeader>Properties</SectionHeader>
-          <DetailRow label="Status">{matched}</DetailRow>
-          {detail.score != null ? <DetailRow label="Score">{scoreLabel(detail.score)}</DetailRow> : null}
-          <DetailRow label="Dimensions">{dimensions}</DetailRow>
-          <DetailRow label="Size">{fileSize}</DetailRow>
-          <DetailRow label="Type">{formatValue}</DetailRow>
+          <Section title="Properties">
+            <DetailRow label="Status">{matched}</DetailRow>
+            {detail.score != null ? <DetailRow label="Score">{scoreLabel(detail.score)}</DetailRow> : null}
+            <DetailRow label="Dimensions">{dimensions}</DetailRow>
+            <DetailRow label="Size">{fileSize}</DetailRow>
+            <DetailRow label="Type">{formatValue}</DetailRow>
+          </Section>
 
-          <SectionHeader>Source</SectionHeader>
-          <DetailRow label="Asset">
-            <button
-              type="button"
-              className="cursor-pointer text-right text-accent underline decoration-accent/30 underline-offset-2 transition-colors hover:text-accent hover:decoration-accent/60"
-              onClick={() => void window.mediaWorkspace?.revealPath?.(detail.export_path)}
-              title="Reveal in Finder"
-            >
-              {escapePathLabel(detail.export_path)}
-            </button>
-          </DetailRow>
-          <DetailRow label="Source">
-            {detail.raw_path ? (
+          <Section title="Source">
+            <DetailRow label="Asset">
               <button
                 type="button"
                 className="cursor-pointer text-right text-accent underline decoration-accent/30 underline-offset-2 transition-colors hover:text-accent hover:decoration-accent/60"
-                onClick={() => void window.mediaWorkspace?.revealPath?.(detail.raw_path)}
+                onClick={() => void window.mediaWorkspace?.revealPath?.(detail.export_path)}
                 title="Reveal in Finder"
               >
-                {escapePathLabel(detail.raw_path)}
+                {escapePathLabel(detail.export_path)}
               </button>
-            ) : "Not linked"}
-          </DetailRow>
-          <DetailRow label="Source file">{rawName || "—"}</DetailRow>
+            </DetailRow>
+            <DetailRow label="Source">
+              {detail.raw_path ? (
+                <button
+                  type="button"
+                  className="cursor-pointer text-right text-accent underline decoration-accent/30 underline-offset-2 transition-colors hover:text-accent hover:decoration-accent/60"
+                  onClick={() => void window.mediaWorkspace?.revealPath?.(detail.raw_path)}
+                  title="Reveal in Finder"
+                >
+                  {escapePathLabel(detail.raw_path)}
+                </button>
+              ) : "Not linked"}
+            </DetailRow>
+            <DetailRow label="Source file">{rawName || "—"}</DetailRow>
+            {exportMeta.software ? <DetailRow label="Software">{exportMeta.software}</DetailRow> : null}
+          </Section>
 
-          <SectionHeader>Camera</SectionHeader>
-          <DetailRow label="Camera">{rawMeta.camera_model || exportMeta.camera_model || "—"}</DetailRow>
-          <DetailRow label="Lens">{rawMeta.lens_model || "—"}</DetailRow>
+          <Section title="Camera">
+            <DetailRow label="Camera">{rawMeta.camera_model || exportMeta.camera_model || "—"}</DetailRow>
+            <DetailRow label="Lens">{rawMeta.lens_model || exportMeta.lens_model || "—"}</DetailRow>
+          </Section>
 
-          <SectionHeader>Dates</SectionHeader>
-          <DetailRow label="Imported">{formatTimestamp(detail.imported_at || exportMeta.imported_at)}</DetailRow>
-          <DetailRow label="Captured">{formatTimestamp(rawMeta.capture_time || exportMeta.capture_time)}</DetailRow>
-          <DetailRow label="Modified">{formatTimestamp(exportMeta.modified_time || detail.updated_at)}</DetailRow>
+          {hasExposure ? (
+            <Section title="Exposure">
+              {focal ? <DetailRow label="Focal length">{focal}</DetailRow> : null}
+              {aperture ? <DetailRow label="Aperture">{aperture}</DetailRow> : null}
+              {shutter ? <DetailRow label="Shutter">{shutter}</DetailRow> : null}
+              {iso ? <DetailRow label="ISO">{iso}</DetailRow> : null}
+            </Section>
+          ) : null}
+
+          <Section title="Dates">
+            <DetailRow label="Imported">{formatTimestamp(detail.imported_at || exportMeta.imported_at)}</DetailRow>
+            <DetailRow label="Captured">{formatTimestamp(rawMeta.capture_time || exportMeta.capture_time)}</DetailRow>
+            <DetailRow label="Modified">{formatTimestamp(exportMeta.modified_time || detail.updated_at)}</DetailRow>
+          </Section>
         </div>
       </div>
-
     </aside>
   );
 }

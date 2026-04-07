@@ -16,8 +16,20 @@ class RawMetadata:
     file_size: int
     modified_time: str
     capture_time: str | None
+    camera_make: str | None
     camera_model: str | None
     lens_model: str | None
+    software: str | None
+    iso: int | None
+    aperture: float | None
+    shutter_speed: float | None
+    focal_length: float | None
+    flash: int | None
+    white_balance: int | None
+    color_space: str | int | None
+    lens_specification: list[float] | None
+    gps_latitude: float | None
+    gps_longitude: float | None
     width: int | None
     height: int | None
     metadata_level: str
@@ -43,8 +55,20 @@ class ExportCandidate:
     file_size: int
     modified_time: str
     capture_time: str | None
+    camera_make: str | None
     camera_model: str | None
     lens_model: str | None
+    software: str | None
+    iso: int | None
+    aperture: float | None
+    shutter_speed: float | None
+    focal_length: float | None
+    flash: int | None
+    white_balance: int | None
+    color_space: str | int | None
+    lens_specification: list[float] | None
+    gps_latitude: float | None
+    gps_longitude: float | None
     width: int | None
     height: int | None
 
