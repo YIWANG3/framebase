@@ -17,6 +17,8 @@ function CardContent({ item, selected, onSelect, width, height, fit, containerRe
     <button
       type="button"
       onClick={() => onSelect(item.export_path)}
+      data-gallery-item="true"
+      data-export-path={item.export_path}
       className="group absolute text-left focus:outline-none"
       style={{
         width: `${width}px`,
@@ -66,6 +68,7 @@ export default function Gallery({
   items,
   selectedExportPath,
   onSelect,
+  onLayoutItemsChange,
   loading,
   loadingMore,
   hasMore,
@@ -123,9 +126,8 @@ export default function Gallery({
     }
   }
 
-  // --- Grid layout (virtualized) ---
-  const gridMetrics = useMemo(() => {
-    if (displayMode !== "grid" || !containerWidth) return null;
+  const gridLayout = useMemo(() => {
+    if (!containerWidth) return null;
     const availableWidth = Math.max(containerWidth - 24, thumbSize);
     const columnCount = Math.max(1, Math.floor((availableWidth + GAP) / (thumbSize + GAP)));
     const cellWidth = (availableWidth - GAP * (columnCount - 1)) / columnCount;
@@ -133,53 +135,45 @@ export default function Gallery({
     const cardHeight = imgHeight + CAPTION_HEIGHT;
     const rowStride = cardHeight + GAP;
     const totalRows = Math.ceil(items.length / columnCount);
-    const startRow = Math.max(0, Math.floor((scrollTop - OVERSCAN_PX) / rowStride));
-    const endRow = Math.min(totalRows, Math.ceil((scrollTop + viewportHeight + OVERSCAN_PX) / rowStride));
-    const visibleItems = [];
-    for (let r = startRow; r < endRow; r++) {
-      for (let c = 0; c < columnCount; c++) {
-        const idx = r * columnCount + c;
-        if (idx >= items.length) break;
-        visibleItems.push({
-          item: items[idx],
-          left: c * (cellWidth + GAP),
-          top: r * rowStride,
-          width: cellWidth,
-          imgHeight,
-        });
-      }
+    const positions = [];
+    for (let idx = 0; idx < items.length; idx += 1) {
+      const row = Math.floor(idx / columnCount);
+      const col = idx % columnCount;
+      positions.push({
+        item: items[idx],
+        left: col * (cellWidth + GAP),
+        top: row * rowStride,
+        width: cellWidth,
+        imgHeight,
+      });
     }
-    return { totalHeight: Math.max(0, totalRows * rowStride - GAP), visibleItems };
-  }, [displayMode, containerWidth, items, scrollTop, viewportHeight, thumbSize]);
+    return {
+      totalHeight: Math.max(0, totalRows * rowStride - GAP),
+      positions,
+    };
+  }, [containerWidth, items, thumbSize]);
 
-  // --- Justified layout (virtualized) ---
-  const justifiedMetrics = useMemo(() => {
-    if (displayMode !== "justified" || !containerWidth) return null;
+  const justifiedLayoutData = useMemo(() => {
+    if (!containerWidth) return null;
     const rowHeight = Math.round(thumbSize * 0.66);
     const layout = buildJustifiedLayout(items, Math.max(containerWidth - 24, 0), rowHeight, GAP, CAPTION_HEIGHT);
     if (!layout.rows.length) return null;
-    // Compute row tops for viewport culling
+    const positions = layout.rows.flat();
     const rowTops = layout.rows.map((row) => row[0]?.top ?? 0);
     const rowBottoms = layout.rows.map((row) => {
       const maxH = Math.max(...row.map((b) => b.height));
       return (row[0]?.top ?? 0) + maxH + CAPTION_HEIGHT;
     });
-    const visTop = scrollTop - OVERSCAN_PX;
-    const visBottom = scrollTop + viewportHeight + OVERSCAN_PX;
-    const visibleBoxes = [];
-    for (let i = 0; i < layout.rows.length; i++) {
-      if (rowBottoms[i] < visTop) continue;
-      if (rowTops[i] > visBottom) break;
-      for (const box of layout.rows[i]) {
-        visibleBoxes.push(box);
-      }
-    }
-    return { containerHeight: layout.containerHeight, visibleBoxes };
-  }, [displayMode, containerWidth, items, scrollTop, viewportHeight, thumbSize]);
+    return {
+      containerHeight: layout.containerHeight,
+      positions,
+      rowTops,
+      rowBottoms,
+    };
+  }, [containerWidth, items, thumbSize]);
 
-  // --- Waterfall layout (virtualized) ---
-  const waterfallMetrics = useMemo(() => {
-    if (displayMode !== "waterfall" || !containerWidth) return null;
+  const waterfallLayout = useMemo(() => {
+    if (!containerWidth) return null;
     const availableWidth = Math.max(containerWidth - 24, thumbSize);
     const columnCount = Math.max(1, Math.floor((availableWidth + GAP) / (thumbSize + GAP)));
     const colWidth = (availableWidth - GAP * (columnCount - 1)) / columnCount;
@@ -203,13 +197,94 @@ export default function Gallery({
       colHeights[minCol] = top + imgHeight + CAPTION_HEIGHT + GAP;
     }
     const totalHeight = Math.max(0, Math.max(...colHeights) - GAP);
+    return { totalHeight, positions };
+  }, [containerWidth, items, thumbSize]);
+
+  const layoutItems = useMemo(() => {
+    const source = displayMode === "justified"
+      ? justifiedLayoutData?.positions
+      : displayMode === "waterfall"
+        ? waterfallLayout?.positions
+        : gridLayout?.positions;
+    return (source || []).map((entry, index) => ({
+      exportPath: entry.item.export_path,
+      index,
+      left: entry.left,
+      top: entry.top,
+      width: entry.width,
+      height: (entry.height ?? entry.imgHeight) + CAPTION_HEIGHT,
+    }));
+  }, [displayMode, gridLayout, justifiedLayoutData, waterfallLayout]);
+
+  useEffect(() => {
+    onLayoutItemsChange?.(layoutItems);
+  }, [layoutItems, onLayoutItemsChange]);
+
+  useEffect(() => {
+    if (!selectedExportPath || !containerRef.current) return;
+    const escaped = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(selectedExportPath) : selectedExportPath.replaceAll('"', '\\"');
+    const element = containerRef.current.querySelector(`[data-export-path="${escaped}"]`);
+    if (element instanceof HTMLElement) {
+      element.scrollIntoView({ block: "nearest", inline: "nearest" });
+      return;
+    }
+
+    const target = layoutItems.find((item) => item.exportPath === selectedExportPath);
+    if (!target) return;
+
+    const viewportTop = containerRef.current.scrollTop;
+    const viewportBottom = viewportTop + containerRef.current.clientHeight;
+    const targetTop = target.top;
+    const targetBottom = target.top + target.height;
+    if (targetTop >= viewportTop && targetBottom <= viewportBottom) return;
+
+    const nextScrollTop = Math.max(0, targetTop - Math.max(24, (containerRef.current.clientHeight - target.height) / 2));
+    containerRef.current.scrollTo({ top: nextScrollTop, behavior: "smooth" });
+  }, [selectedExportPath, layoutItems]);
+
+  const gridMetrics = useMemo(() => {
+    if (displayMode !== "grid" || !gridLayout) return null;
     const visTop = scrollTop - OVERSCAN_PX;
     const visBottom = scrollTop + viewportHeight + OVERSCAN_PX;
-    const visibleItems = positions.filter(
+    const visibleItems = gridLayout.positions.filter(
+      (entry) => entry.top + entry.imgHeight + CAPTION_HEIGHT >= visTop && entry.top <= visBottom,
+    );
+    return { totalHeight: gridLayout.totalHeight, visibleItems };
+  }, [displayMode, gridLayout, scrollTop, viewportHeight]);
+
+  const justifiedMetrics = useMemo(() => {
+    if (displayMode !== "justified" || !justifiedLayoutData) return null;
+    const visTop = scrollTop - OVERSCAN_PX;
+    const visBottom = scrollTop + viewportHeight + OVERSCAN_PX;
+    const visibleBoxes = justifiedLayoutData.positions.filter(
+      (box) => box.top + box.height + CAPTION_HEIGHT >= visTop && box.top <= visBottom,
+    );
+    return { containerHeight: justifiedLayoutData.containerHeight, visibleBoxes };
+  }, [displayMode, justifiedLayoutData, scrollTop, viewportHeight]);
+
+  const waterfallMetrics = useMemo(() => {
+    if (displayMode !== "waterfall" || !waterfallLayout) return null;
+    const visTop = scrollTop - OVERSCAN_PX;
+    const visBottom = scrollTop + viewportHeight + OVERSCAN_PX;
+    const visibleItems = waterfallLayout.positions.filter(
       (p) => p.top + p.imgHeight + CAPTION_HEIGHT >= visTop && p.top <= visBottom,
     );
-    return { totalHeight, visibleItems, colWidth };
-  }, [displayMode, containerWidth, items, scrollTop, viewportHeight, thumbSize]);
+    return { totalHeight: waterfallLayout.totalHeight, visibleItems };
+  }, [displayMode, waterfallLayout, scrollTop, viewportHeight]);
+
+  const metrics = displayMode === "justified" ? justifiedMetrics
+    : displayMode === "waterfall" ? waterfallMetrics
+      : gridMetrics;
+
+  const totalHeight = metrics
+    ? displayMode === "justified" ? Math.ceil(metrics.containerHeight) : metrics.totalHeight
+    : 0;
+
+  const visibleItems = metrics
+    ? displayMode === "justified" ? metrics.visibleBoxes : metrics.visibleItems
+      : [];
+
+  const fit = displayMode === "justified" ? "contain" : "cover";
 
   if (loading) {
     return (
@@ -229,20 +304,6 @@ export default function Gallery({
       </div>
     );
   }
-
-  const metrics = displayMode === "justified" ? justifiedMetrics
-    : displayMode === "waterfall" ? waterfallMetrics
-    : gridMetrics;
-
-  const totalHeight = metrics
-    ? displayMode === "justified" ? Math.ceil(metrics.containerHeight) : metrics.totalHeight
-    : 0;
-
-  const visibleItems = metrics
-    ? displayMode === "justified" ? metrics.visibleBoxes : metrics.visibleItems
-    : [];
-
-  const fit = displayMode === "justified" ? "contain" : "cover";
 
   return (
     <div ref={containerRef} onScroll={handleScroll} className="h-full overflow-auto bg-app px-3 py-3">

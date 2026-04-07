@@ -464,8 +464,9 @@ app.whenReady().then(() => {
     const raw = request.url.slice("media://".length);
     const filePath = raw.split("/").map((seg) => decodeURIComponent(seg)).join(path.sep);
     const resolved = path.resolve(filePath);
-    const inCatalog = resolved.startsWith(currentCatalogPath + path.sep);
-    if (!inCatalog) {
+    const inCatalog = resolved === currentCatalogPath || resolved.startsWith(currentCatalogPath + path.sep);
+    const existsOnDisk = fs.existsSync(resolved);
+    if (!inCatalog && !existsOnDisk) {
       return new Response("forbidden", { status: 403 });
     }
     return net.fetch(pathToFileURL(resolved).toString());
