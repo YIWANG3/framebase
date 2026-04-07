@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Minus, Plus, SwatchBook, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fileName, localFileUrl } from "../utils/format";
 
@@ -25,6 +25,26 @@ function OverlayButton({ children, className = "", ...props }) {
   );
 }
 
+function ActionPill({ icon: Icon, label, shortcut, active = false, className = "", ...props }) {
+  return (
+    <button
+      type="button"
+      className={[
+        "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-[12px] font-medium transition-colors",
+        active
+          ? "border-white/22 bg-white/18 text-white"
+          : "border-white/12 bg-black/26 text-white/80 hover:border-white/18 hover:bg-black/36 hover:text-white",
+        className,
+      ].join(" ")}
+      {...props}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      <span>{label}</span>
+      {shortcut ? <span className="text-[11px] text-white/45">{shortcut}</span> : null}
+    </button>
+  );
+}
+
 function formatPercent(scale) {
   return `${Math.round(scale * 100)}%`;
 }
@@ -33,6 +53,8 @@ export default function Lightbox({
   open,
   items,
   currentIndex,
+  proofMode,
+  onToggleProof,
   onClose,
   onIndexChange,
 }) {
@@ -117,7 +139,7 @@ export default function Lightbox({
     const rect = viewport.getBoundingClientRect();
     const cx = rect.width / 2;
     const cy = rect.height / 2;
-    const clampedScale = clamp(nextScale, fitScaleRef.current, MAX_SCALE);
+    const clampedScale = clamp(nextScale, MIN_SCALE, MAX_SCALE);
     const ratio = clampedScale / current.scale;
     applyView({
       scale: clampedScale,
@@ -182,7 +204,7 @@ export default function Lightbox({
       const mx = event.clientX - rect.left;
       const my = event.clientY - rect.top;
       const factor = Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY);
-      const nextScale = clamp(current.scale * factor, fitScaleRef.current, MAX_SCALE);
+      const nextScale = clamp(current.scale * factor, MIN_SCALE, MAX_SCALE);
       if (Math.abs(nextScale - current.scale) < 0.0001) return;
       const ratio = nextScale / current.scale;
       applyView({
@@ -203,10 +225,15 @@ export default function Lightbox({
     const height = event.currentTarget.naturalHeight;
     if (!width || !height) return;
     setNaturalSize({ width, height });
+    const fit = computeFit(width, height);
+    fitScaleRef.current = fit.scale;
+    setFitScale(fit.scale);
+    setDisplayScale(fit.scale);
+    viewRef.current = fit;
+    if (imageRef.current) {
+      imageRef.current.style.transform = `translate3d(${fit.tx}px, ${fit.ty}px, 0) scale(${fit.scale})`;
+    }
     setLoadState("ready");
-    requestAnimationFrame(() => {
-      resetToFit(width, height);
-    });
   }
 
   function handleImageError() {
@@ -279,10 +306,16 @@ export default function Lightbox({
 
   return (
     <div
-      className="fixed inset-0 z-[10050] flex flex-col bg-black/90 backdrop-blur-sm"
+      className={[
+        "fixed inset-0 z-[10050] flex flex-col",
+        proofMode ? "bg-white" : "bg-black/90 backdrop-blur-sm",
+      ].join(" ")}
       onClick={onClose}
     >
-      <div className="pointer-events-none flex shrink-0 items-center justify-between px-6 py-5">
+      <div className={[
+        "pointer-events-none flex shrink-0 items-start justify-between px-6 py-5",
+        proofMode ? "invisible" : "",
+      ].join(" ")}>
         <div className="pointer-events-auto min-w-0">
           <div className="truncate text-[15px] font-medium text-white">{title}</div>
           <div className="mt-1 text-[12px] text-white/60">
@@ -290,12 +323,22 @@ export default function Lightbox({
             {(metaWidth > 0 && metaHeight > 0) ? ` · ${metaWidth} × ${metaHeight}` : ""}
           </div>
         </div>
-        <OverlayButton onClick={onClose} className="pointer-events-auto">
-          <X className="h-4 w-4" />
-        </OverlayButton>
+        <div className="pointer-events-auto flex items-center gap-2">
+          <ActionPill
+            icon={SwatchBook}
+            label="Proof"
+            shortcut="P"
+            active={proofMode}
+            onClick={onToggleProof}
+          />
+          <OverlayButton onClick={onClose}>
+            <X className="h-4 w-4" />
+          </OverlayButton>
+        </div>
       </div>
 
-      {canGoPrev ? (
+      {!proofMode && canGoPrev ? (
+
         <OverlayButton
           onClick={(event) => {
             event.stopPropagation();
@@ -307,7 +350,7 @@ export default function Lightbox({
         </OverlayButton>
       ) : null}
 
-      {canGoNext ? (
+      {!proofMode && canGoNext ? (
         <OverlayButton
           onClick={(event) => {
             event.stopPropagation();
@@ -367,41 +410,44 @@ export default function Lightbox({
       </div>
 
       <div
-        className="pointer-events-none flex shrink-0 items-center justify-center gap-3 py-4"
+        className={[
+          "pointer-events-none flex shrink-0 items-center justify-center gap-3 py-4",
+          proofMode ? "invisible" : "",
+        ].join(" ")}
         onClick={(event) => event.stopPropagation()}
       >
-        <button
-          type="button"
-          className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
-          onClick={() => zoomFromCenter(scale / 1.35)}
-        >
-          <Minus className="h-3.5 w-3.5" />
-        </button>
-        <input
-          type="range"
-          min={Math.log(Math.max(fitScale, MIN_SCALE))}
-          max={Math.log(MAX_SCALE)}
-          step={0.01}
-          value={Math.log(Math.max(scale, fitScale, MIN_SCALE))}
-          onChange={handleSliderChange}
-          className="pointer-events-auto w-32"
-          aria-label="Zoom level"
-        />
-        <button
-          type="button"
-          className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
-          onClick={() => zoomFromCenter(scale * 1.35)}
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          className="pointer-events-auto ml-1 rounded px-2 py-0.5 text-[11px] tabular-nums text-white/50 transition-colors hover:bg-white/10 hover:text-white/80"
-          onClick={() => resetToFit()}
-          title="Reset to fit"
-        >
-          {formatPercent(scale)}
-        </button>
+          <button
+            type="button"
+            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            onClick={() => zoomFromCenter(scale / 1.35)}
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </button>
+          <input
+            type="range"
+            min={Math.log(Math.max(fitScale * 0.25, MIN_SCALE))}
+            max={Math.log(MAX_SCALE)}
+            step={0.01}
+            value={Math.log(Math.max(scale, fitScale, MIN_SCALE))}
+            onChange={handleSliderChange}
+            className="lightbox-slider pointer-events-auto w-32"
+            aria-label="Zoom level"
+          />
+          <button
+            type="button"
+            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            onClick={() => zoomFromCenter(scale * 1.35)}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            className="pointer-events-auto ml-1 rounded px-2 py-0.5 text-[11px] tabular-nums text-white/50 transition-colors hover:bg-white/10 hover:text-white/80"
+            onClick={() => resetToFit()}
+            title="Reset to fit"
+          >
+            {formatPercent(scale)}
+          </button>
       </div>
     </div>
   );

@@ -18,6 +18,7 @@ export default function App() {
   const [history, setHistory] = useState(["all"]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [proofMode, setProofMode] = useState(false);
   const [layoutItems, setLayoutItems] = useState([]);
   const resizeSidebar = usePaneResize(workspace.setSidebarWidth, 200, 360);
   const resizeInspector = usePaneResize((value) => workspace.setInspectorWidth(-value), -420, -240);
@@ -149,6 +150,7 @@ export default function App() {
   useEffect(() => {
     if (!workspace.selectedExportPath) {
       setLightboxOpen(false);
+      setProofMode(false);
     }
   }, [workspace.selectedExportPath]);
 
@@ -171,10 +173,20 @@ export default function App() {
         return;
       }
 
+      if (lightboxOpen && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        setProofMode((current) => !current);
+        return;
+      }
+
       if (event.key === "Escape") {
         if (!lightboxOpen) return;
         event.preventDefault();
-        setLightboxOpen(false);
+        if (proofMode) {
+          setProofMode(false);
+        } else {
+          setLightboxOpen(false);
+        }
       } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
         event.preventDefault();
         selectByDirection(event.key === "ArrowLeft" ? "left" : "up");
@@ -186,7 +198,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [lightboxOpen, workspace.selectedExportPath, selectedIndex, currentItems, layoutItems, displayMode]);
+  }, [displayMode, layoutItems, lightboxOpen, proofMode, selectedIndex, currentItems, workspace.selectedExportPath]);
 
   return (
     <div className="noise-overlay h-full overflow-hidden bg-app text-text">
@@ -279,7 +291,12 @@ export default function App() {
         open={lightboxOpen}
         items={currentItems}
         currentIndex={Math.max(selectedIndex, 0)}
-        onClose={() => setLightboxOpen(false)}
+        proofMode={proofMode}
+        onToggleProof={() => setProofMode((current) => !current)}
+        onClose={() => {
+          setProofMode(false);
+          setLightboxOpen(false);
+        }}
         onIndexChange={selectByIndex}
       />
     </div>

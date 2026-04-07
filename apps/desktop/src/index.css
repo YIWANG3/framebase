@@ -118,6 +118,15 @@ input[type="range"]::-webkit-slider-thumb:hover {
   opacity: 1;
 }
 
+.lightbox-slider::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.lightbox-slider::-webkit-slider-thumb {
+  background: rgb(255 255 255);
+  opacity: 1;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
