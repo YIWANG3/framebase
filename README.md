@@ -1,138 +1,78 @@
 # Media Resource Management
 
-Local-first post-export photo content workspace.
+**English** | [简体中文](README.zh-CN.md)
 
-This repository now treats the catalog as the core product object:
+A local-first workspace for reviewing, organizing, and reconciling large photo and media libraries.
 
-- `.mwcatalog` bundle with internal SQLite, previews, proxies, derived, jobs, and logs
-- reference-based asset graph for plain RAW and plain export files
-- RAW directory scanner and metadata cache
-- export watcher with reverse lookup scoring centered on stable filename stems
-- persistent registry for confirmed export-to-RAW mappings
-- minimal Electron shell that surfaces summary and pending matches
+This project is designed for people who deal with big batches of exported files and need a faster way to understand what is already connected, what still needs attention, and where each asset came from.
 
-## Repository layout
+![Media Resource Management workspace](docs/assets/media-resource-management-screenshot.png)
 
-- `services/sidecar`: Python sidecar for catalog indexing, reverse lookup, registry, and backend services
-- `apps/desktop`: minimal Electron shell for local inspection
-- `tests`: backend smoke tests for scan and reverse lookup
-- `docs/current-plan.md`: verified status, performance recap, and next-step plan
+## What the product does
 
-## Quick start
+Media Resource Management helps you:
 
-Initialize a catalog bundle:
+- bring processed media into one visual workspace
+- separate **matched** and **unmatched** assets at a glance
+- review large libraries quickly in a dense browser layout
+- inspect previews and file details without leaving the workspace
+- keep separate catalogs for different jobs, clients, or review sessions
 
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace init-catalog --catalog data/default.mwcatalog
-```
+## Typical use cases
 
-Scan a RAW directory:
+This product is a good fit for:
 
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace scan-raw \
-  --catalog data/default.mwcatalog \
-  --raw-dir /path/to/raw-library
-```
+- photographers managing RAW files and exported JPGs
+- editors reviewing large delivery folders
+- studios cleaning up import workflows after export
+- creative teams who want a calmer, more visual alternative to folder-by-folder checking
 
-This now defaults to the review-oriented fast path:
+## Typical workflow
 
-- `--fingerprint-mode head-only`
-- `--metadata-profile matcher`
+1. Open or create a catalog for a project.
+2. Add source media and processed exports.
+3. Let the workspace organize and surface likely relationships.
+4. Browse everything in one place.
+5. Focus on the assets that still need review, confirmation, or cleanup.
 
-Backfill fuller RAW metadata later:
+## Current experience
 
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace enrich-raw \
-  --catalog data/default.mwcatalog \
-  --workers 8
-```
+The current desktop experience is centered on fast visual review:
 
-Resolve a single export:
+- **All Assets** view for the full library
+- **Matched** and **Unmatched** views for quick triage
+- a large gallery for scanning many images quickly
+- a right-hand inspector for preview, dimensions, file type, and source details
+- a local catalog-based workflow so each workspace stays self-contained
 
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace resolve-export \
-  --catalog data/default.mwcatalog \
-  --path /path/to/export.jpg
-```
+## Why local-first matters
 
-Resolve an export directory in batch:
+Your media stays tied to your own storage and working environment.
 
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace resolve-export-batch \
-  --catalog data/default.mwcatalog \
-  --export-dir /path/to/exports
-```
+That means the product is aimed at people who care about:
 
-Run the polling export watcher:
+- keeping source files on their own drives
+- working with existing folder structures
+- avoiding unnecessary cloud complexity during review
+- maintaining a clear review workspace without moving everything into a new system first
 
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace watch-export \
-  --catalog data/default.mwcatalog \
-  --export-dir /path/to/exports
-```
+## What this repository contains
 
-Generate cached previews or proxies inside the catalog:
+This repository includes the product work behind that experience:
 
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace generate-previews \
-  --catalog data/default.mwcatalog \
-  --kind preview \
-  --asset-type export \
-  --limit 200
-```
+- the desktop review app
+- catalog and workspace examples
+- import and matching services
+- supporting docs, design exploration, and tests
 
-List pending manual confirmations:
+## Project status
 
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace list-pending \
-  --catalog data/default.mwcatalog
-```
+This is an early but usable product direction focused on one core promise:
 
-Confirm a match:
+**make large media libraries easier to review, reconcile, and trust.**
 
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace confirm-match \
-  --catalog data/default.mwcatalog \
-  --export-path /path/to/export.jpg \
-  --raw-asset-id raw_1234567890abcdef
-```
+The current scope is intentionally narrow. It prioritizes browsing, matching, and inspection before expanding into broader workflow or collaboration features.
 
-Export reviewed catalog rows into a ground-truth CSV:
+---
 
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace export-ground-truth \
-  --catalog data/default.mwcatalog \
-  --status matched \
-  --output-csv data/ground-truth/review-seed.csv
-```
-
-Run a repeatable dataset benchmark across metadata, scan, resolve, and preview:
-
-```bash
-PYTHONPATH=services/sidecar/src python3 -m media_workspace benchmark-dataset \
-  --catalog data/benchmarks/resources-large.mwcatalog \
-  --raw-dir RESOURCES/RAW \
-  --export-dir RESOURCES/Export \
-  --report-json data/benchmarks/resources-large.json
-```
-
-Electron shell:
-
-```bash
-cd apps/desktop
-npm install
-MEDIA_WORKSPACE_CATALOG=../../data/default.mwcatalog npm start
-```
-
-## Current scope
-
-The backend is intentionally conservative:
-
-- catalog owns cache artifacts, not source RAW/export files
-- RAW identity is fingerprint-based, not path-based
-- reverse lookup writes a permanent registry row once confirmed
-- export watching is polling-based to avoid adding native dependencies in Phase 0
-- reverse lookup treats stable filename stems as the primary feature
-- file-level metadata is an enhancement, not a product assumption
-
-This is enough to validate the core workflow before adding thumbnails, proxy generation, visual hashes, content drafts, and AI/plugin layers.
+If you are looking for implementation notes or deeper technical details, see [docs/developer-setup.md](docs/developer-setup.md).
