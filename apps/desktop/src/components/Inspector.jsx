@@ -1,6 +1,28 @@
 import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Star } from "lucide-react";
 import { fileName, escapePathLabel, formatBytes, formatTimestamp, localFileUrl, formatShutterSpeed, formatAperture, formatFocalLength, formatISO } from "../utils/format";
+
+function StarRating({ value = 0, onChange }) {
+  const [hover, setHover] = useState(0);
+  const display = hover || value;
+  return (
+    <div className="flex gap-0.5" onMouseLeave={() => setHover(0)}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <button
+          key={i}
+          type="button"
+          className="p-0.5 transition-colors"
+          onMouseEnter={() => setHover(i)}
+          onClick={() => onChange?.(i === value ? 0 : i)}
+        >
+          <Star
+            className={`h-3.5 w-3.5 ${i <= display ? "fill-[rgb(225,180,105)] text-[rgb(225,180,105)]" : "text-muted2/40 hover:text-muted2/60"}`}
+          />
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function DetailRow({ label, children }) {
   return (
@@ -28,7 +50,14 @@ function Section({ title, defaultOpen = true, children }) {
   );
 }
 
-export default function Inspector({ detail }) {
+function formatGPS(lat, lon) {
+  if (lat == null || lon == null) return null;
+  const latDir = lat >= 0 ? "N" : "S";
+  const lonDir = lon >= 0 ? "E" : "W";
+  return `${Math.abs(lat).toFixed(4)}° ${latDir}, ${Math.abs(lon).toFixed(4)}° ${lonDir}`;
+}
+
+export default function Inspector({ detail, onRatingChange }) {
   if (!detail) {
     return (
       <aside className="flex h-full items-center justify-center overflow-y-auto bg-chrome px-4">
@@ -49,6 +78,23 @@ export default function Inspector({ detail }) {
   const formatValue = (detail.export_path || "").split(".").pop()?.toUpperCase() || "Unknown";
   const dimensions = exportMeta.width && exportMeta.height ? `${exportMeta.width} × ${exportMeta.height}` : "Unknown";
   const fileSize = formatBytes(exportMeta.file_size || exportMeta.size_bytes) || "Unknown";
+
+  const metaRating = Number(rawMeta.rating ?? exportMeta.rating ?? 0);
+  const [localRating, setLocalRating] = useState(null);
+  const [ratingAssetId, setRatingAssetId] = useState(null);
+
+  // Reset local override when switching assets
+  const currentAssetId = detail.asset_id || detail.export_path;
+  if (ratingAssetId !== currentAssetId) {
+    setRatingAssetId(currentAssetId);
+    setLocalRating(null);
+  }
+
+  const rating = localRating ?? metaRating;
+  const gps = formatGPS(
+    rawMeta.gps_latitude ?? exportMeta.gps_latitude,
+    rawMeta.gps_longitude ?? exportMeta.gps_longitude,
+  );
 
   const exposureMeta = rawMeta.capture_time ? rawMeta : exportMeta;
   const aperture = formatAperture(exposureMeta.aperture);
@@ -73,6 +119,17 @@ export default function Inspector({ detail }) {
 
         <div className="px-0.5">
           <h2 className="text-[13px] font-medium leading-tight text-text">{exportName || detail.stem}</h2>
+
+          <div className="mt-3 flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted2">Rating</span>
+            <StarRating
+              value={rating}
+              onChange={(next) => {
+                setLocalRating(next);
+                onRatingChange?.(detail.export_path, next);
+              }}
+            />
+          </div>
 
           <Section title="Properties">
             <DetailRow label="Dimensions">{dimensions}</DetailRow>
@@ -126,6 +183,12 @@ export default function Inspector({ detail }) {
             <DetailRow label="Captured">{formatTimestamp(rawMeta.capture_time || exportMeta.capture_time)}</DetailRow>
             <DetailRow label="Modified">{formatTimestamp(exportMeta.modified_time || detail.updated_at)}</DetailRow>
           </Section>
+
+          {gps ? (
+            <Section title="Location">
+              <DetailRow label="GPS">{gps}</DetailRow>
+            </Section>
+          ) : null}
         </div>
       </div>
     </aside>
