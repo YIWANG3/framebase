@@ -22,6 +22,7 @@ export default function useWorkspace() {
   const [query, setQuery] = useState("");
   const [selectedExportPath, setSelectedExportPath] = useState(null);
   const [browserLoading, setBrowserLoading] = useState(false);
+  const [browserReady, setBrowserReady] = useState(false);
   const [browserLoadingMore, setBrowserLoadingMore] = useState(false);
   const [browserHasMore, setBrowserHasMore] = useState(true);
   const [browserOffset, setBrowserOffset] = useState(0);
@@ -29,9 +30,12 @@ export default function useWorkspace() {
   const [previewTask, setPreviewTask] = useState(null);
   const [enrichmentTask, setEnrichmentTask] = useState(null);
   const [pendingImport, setPendingImport] = useState({ rawDirs: [], exportDirs: [] });
+  const [collections, setCollections] = useState([]);
+  const [activeCollectionId, setActiveCollectionId] = useState(null);
   const importPollRef = useRef(null);
   const enrichmentPollRef = useRef(null);
   const previewPollRef = useRef(null);
+  const browserRequestIdRef = useRef(0);
 
   const rawDirs = useMemo(
     () => roots.filter((item) => item.root_type === "raw").map((item) => item.path),
@@ -123,10 +127,12 @@ export default function useWorkspace() {
     setDetail(payload);
   }
 
-  async function loadBrowser({ nextStatus = status, append = false } = {}) {
+  async function loadBrowser({ nextStatus = status, append = false, collectionId = activeCollectionId } = {}) {
     if (append ? browserLoadingMore || browserLoading || !browserHasMore : browserLoading) {
       return;
     }
+    const requestId = browserRequestIdRef.current + 1;
+    browserRequestIdRef.current = requestId;
     if (append) {
       setBrowserLoadingMore(true);
     } else {
@@ -134,11 +140,20 @@ export default function useWorkspace() {
     }
     try {
       const nextOffset = append ? browserOffset : 0;
-      const payload = await window.mediaWorkspace.browseExports({
-        status: nextStatus,
-        limit: PAGE_SIZE,
-        offset: nextOffset,
-      });
+      let payload;
+      if (collectionId) {
+        payload = await window.mediaWorkspace.browseCollection(collectionId, {
+          limit: PAGE_SIZE,
+          offset: nextOffset,
+        });
+      } else {
+        payload = await window.mediaWorkspace.browseExports({
+          status: nextStatus,
+          limit: PAGE_SIZE,
+          offset: nextOffset,
+        });
+      }
+      if (browserRequestIdRef.current !== requestId) return;
       setBrowserOffset(nextOffset + payload.length);
       setBrowserHasMore(payload.length === PAGE_SIZE);
       if (append) {
@@ -153,6 +168,7 @@ export default function useWorkspace() {
         setSelectedExportPath(nextSelectedPath);
         await loadDetail(nextSelectedPath || null);
       }
+      setBrowserReady(true);
     } finally {
       if (append) {
         setBrowserLoadingMore(false);
@@ -166,7 +182,65 @@ export default function useWorkspace() {
     await loadBrowser({ nextStatus: status, append: true });
   }
 
-  async function refreshAll({ nextStatus = status } = {}) {
+  async function loadCollections() {
+    try {
+      const list = await window.mediaWorkspace.listCollections();
+      setCollections(list || []);
+    } catch {
+      setCollections([]);
+    }
+  }
+
+  async function createCollection(name) {
+    const col = await window.mediaWorkspace.createCollection(name, "manual");
+    await loadCollections();
+    return col;
+  }
+
+  async function renameCollection(collectionId, name) {
+    await window.mediaWorkspace.updateCollection(collectionId, { name });
+    await loadCollections();
+  }
+
+  async function deleteCollection(collectionId) {
+    await window.mediaWorkspace.deleteCollection(collectionId);
+    if (activeCollectionId === collectionId) {
+      setActiveCollectionId(null);
+    }
+    await loadCollections();
+  }
+
+  async function addToCollection(collectionId, assetIds) {
+    await window.mediaWorkspace.collectionAddItems(collectionId, assetIds);
+    await loadCollections();
+    if (activeCollectionId === collectionId) {
+      await loadBrowser({ collectionId });
+    }
+  }
+
+  async function removeFromCollection(collectionId, assetIds) {
+    await window.mediaWorkspace.collectionRemoveItems(collectionId, assetIds);
+    await loadCollections();
+    if (activeCollectionId === collectionId) {
+      await loadBrowser({ collectionId });
+    }
+  }
+
+  function selectCollection(collectionId) {
+    setActiveCollectionId(collectionId);
+    void loadBrowser({ collectionId });
+  }
+
+  function clearCollection(options = {}) {
+    const { reload = true } = options;
+    if (!activeCollectionId) return;
+    setActiveCollectionId(null);
+    if (reload) {
+      void loadBrowser({ collectionId: null });
+    }
+  }
+
+  async function refreshAll({ nextStatus = status, collectionId = activeCollectionId } = {}) {
     const [nextInfo, nextSummary, nextRoots, nextImportTask, nextPreviewTask, nextEnrichmentTask] = await Promise.all([
       window.mediaWorkspace.getInfo(),
       window.mediaWorkspace.getSummary(),
@@ -181,7 +255,7 @@ export default function useWorkspace() {
     setImportTask(nextImportTask);
     setPreviewTask(nextPreviewTask);
     setEnrichmentTask(nextEnrichmentTask);
-    await loadBrowser({ nextStatus });
+    await Promise.all([loadCollections(), loadBrowser({ nextStatus, collectionId })]);
   }
 
   async function startIncrementalImport({ rawDirs: nextRawDirs = [], exportDirs: nextExportDirs = [], fullCatalog = false }) {
@@ -269,12 +343,15 @@ export default function useWorkspace() {
     setSelectedExportPath(null);
     setItems([]);
     setDetail(null);
+    setBrowserReady(false);
     setBrowserOffset(0);
     setBrowserHasMore(true);
     setImportTask(null);
     setPreviewTask(null);
     setEnrichmentTask(null);
     setPendingImport({ rawDirs: [], exportDirs: [] });
+    setCollections([]);
+    setActiveCollectionId(null);
     await refreshAll({ nextStatus: "all" });
   }
 
@@ -421,6 +498,7 @@ export default function useWorkspace() {
     query,
     setQuery,
     browserLoading,
+    browserReady,
     browserLoadingMore,
     browserHasMore,
     browserOffset,
@@ -433,5 +511,14 @@ export default function useWorkspace() {
     runImportPipeline,
     runEnrichment,
     runPreviewGeneration,
+    collections,
+    activeCollectionId,
+    selectCollection,
+    clearCollection,
+    createCollection,
+    renameCollection,
+    deleteCollection,
+    addToCollection,
+    removeFromCollection,
   };
 }

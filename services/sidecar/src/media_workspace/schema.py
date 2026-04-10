@@ -138,4 +138,28 @@ SCHEMA_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_raw_cache_stem_key ON raw_metadata_cache(stem_key)",
     "CREATE INDEX IF NOT EXISTS idx_raw_cache_capture_time ON raw_metadata_cache(capture_time)",
     "CREATE INDEX IF NOT EXISTS idx_registry_status ON export_lookup_registry(match_status)",
+    """
+    CREATE TABLE IF NOT EXISTS collections (
+        collection_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('manual', 'smart')),
+        parent_collection_id TEXT,
+        rules_json TEXT NOT NULL DEFAULT '[]',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(parent_collection_id) REFERENCES collections(collection_id) ON DELETE SET NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS collection_items (
+        collection_id TEXT NOT NULL,
+        asset_id TEXT NOT NULL,
+        added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (collection_id, asset_id),
+        FOREIGN KEY(collection_id) REFERENCES collections(collection_id) ON DELETE CASCADE,
+        FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_collection_items_asset ON collection_items(asset_id)",
 ]

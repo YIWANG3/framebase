@@ -459,6 +459,62 @@ ipcMain.handle("workspace:reveal", (_event, targetPath) => {
 
 ipcMain.handle("workspace:info", () => workspaceInfo());
 
+// --- Collections ---
+
+ipcMain.handle("workspace:list-collections", () => {
+  return callSidecarJson(["list-collections"]) || [];
+});
+
+ipcMain.handle("workspace:create-collection", (_event, name, kind) => {
+  return callSidecarJson(["create-collection", "--name", name, "--kind", kind || "manual"]);
+});
+
+ipcMain.handle("workspace:update-collection", (_event, collectionId, updates) => {
+  const command = ["update-collection", "--collection-id", collectionId];
+  if (updates.name != null) {
+    command.push("--name", updates.name);
+  }
+  if (updates.rulesJson != null) {
+    command.push("--rules-json", updates.rulesJson);
+  }
+  if (updates.sortOrder != null) {
+    command.push("--sort-order", String(updates.sortOrder));
+  }
+  return callSidecarJson(command);
+});
+
+ipcMain.handle("workspace:delete-collection", (_event, collectionId) => {
+  return callSidecarJson(["delete-collection", "--collection-id", collectionId]);
+});
+
+ipcMain.handle("workspace:collection-add-items", (_event, collectionId, assetIds) => {
+  const command = ["collection-add-items", "--collection-id", collectionId];
+  for (const id of assetIds) {
+    command.push("--asset-id", id);
+  }
+  return callSidecarJson(command);
+});
+
+ipcMain.handle("workspace:collection-remove-items", (_event, collectionId, assetIds) => {
+  const command = ["collection-remove-items", "--collection-id", collectionId];
+  for (const id of assetIds) {
+    command.push("--asset-id", id);
+  }
+  return callSidecarJson(command);
+});
+
+ipcMain.handle("workspace:browse-collection", async (_event, collectionId, options) => {
+  return await callSidecarJsonAsync([
+    "browse-collection",
+    "--collection-id",
+    collectionId,
+    "--limit",
+    String(options?.limit || 120),
+    "--offset",
+    String(options?.offset || 0),
+  ]) || [];
+});
+
 app.whenReady().then(() => {
   protocol.handle("media", (request) => {
     const raw = request.url.slice("media://".length);

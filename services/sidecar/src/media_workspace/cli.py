@@ -25,6 +25,13 @@ from .db import (
     set_catalog_path,
     summary,
     upsert_catalog_root,
+    list_collections,
+    create_collection,
+    update_collection,
+    delete_collection,
+    add_collection_items,
+    remove_collection_items,
+    browse_collection,
 )
 from .evaluation import evaluate_ground_truth
 from .ground_truth import export_ground_truth
@@ -128,6 +135,36 @@ def build_parser() -> argparse.ArgumentParser:
     confirm = subparsers.add_parser("confirm-match", parents=[common])
     confirm.add_argument("--export-path", type=Path, required=True)
     confirm.add_argument("--raw-asset-id", required=True)
+
+    # Collections
+    subparsers.add_parser("list-collections", parents=[common])
+
+    create_col = subparsers.add_parser("create-collection", parents=[common])
+    create_col.add_argument("--name", required=True)
+    create_col.add_argument("--kind", choices=["manual", "smart"], default="manual")
+    create_col.add_argument("--rules-json", default="[]")
+
+    update_col = subparsers.add_parser("update-collection", parents=[common])
+    update_col.add_argument("--collection-id", required=True)
+    update_col.add_argument("--name")
+    update_col.add_argument("--rules-json")
+    update_col.add_argument("--sort-order", type=int)
+
+    delete_col = subparsers.add_parser("delete-collection", parents=[common])
+    delete_col.add_argument("--collection-id", required=True)
+
+    col_add = subparsers.add_parser("collection-add-items", parents=[common])
+    col_add.add_argument("--collection-id", required=True)
+    col_add.add_argument("--asset-id", action="append", required=True)
+
+    col_remove = subparsers.add_parser("collection-remove-items", parents=[common])
+    col_remove.add_argument("--collection-id", required=True)
+    col_remove.add_argument("--asset-id", action="append", required=True)
+
+    browse_col = subparsers.add_parser("browse-collection", parents=[common])
+    browse_col.add_argument("--collection-id", required=True)
+    browse_col.add_argument("--limit", type=int, default=120)
+    browse_col.add_argument("--offset", type=int, default=0)
 
     subparsers.add_parser("cleanup-orphan-exports", parents=[common])
     subparsers.add_parser("catalog-roots", parents=[common])
@@ -472,6 +509,80 @@ def main() -> int:
             print(json.dumps(payload))
         else:
             print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "list-collections":
+        payload = []
+        for row in list_collections(connection):
+            payload.append(
+                {
+                    "collection_id": row["collection_id"],
+                    "name": row["name"],
+                    "kind": row["kind"],
+                    "parent_collection_id": row["parent_collection_id"],
+                    "rules_json": row["rules_json"],
+                    "sort_order": row["sort_order"],
+                    "item_count": row["item_count"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+            )
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "create-collection":
+        col = create_collection(connection, args.name, args.kind, args.rules_json)
+        print(json.dumps(col, indent=2))
+        return 0
+
+    if args.command == "update-collection":
+        update_collection(
+            connection,
+            args.collection_id,
+            name=args.name,
+            rules_json=args.rules_json,
+            sort_order=args.sort_order,
+        )
+        print(json.dumps({"ok": True, "collection_id": args.collection_id}))
+        return 0
+
+    if args.command == "delete-collection":
+        delete_collection(connection, args.collection_id)
+        print(json.dumps({"ok": True, "collection_id": args.collection_id}))
+        return 0
+
+    if args.command == "collection-add-items":
+        add_collection_items(connection, args.collection_id, args.asset_id)
+        print(json.dumps({"ok": True, "collection_id": args.collection_id, "added": args.asset_id}))
+        return 0
+
+    if args.command == "collection-remove-items":
+        remove_collection_items(connection, args.collection_id, args.asset_id)
+        print(json.dumps({"ok": True, "collection_id": args.collection_id, "removed": args.asset_id}))
+        return 0
+
+    if args.command == "browse-collection":
+        payload = []
+        for row in browse_collection(connection, args.collection_id, limit=args.limit, offset=args.offset):
+            preview_path = None
+            if row["preview_relative_path"]:
+                preview_path = str((catalog.root / row["preview_relative_path"]).resolve())
+            payload.append(
+                {
+                    "asset_id": row["asset_id"],
+                    "stem": row["stem"],
+                    "export_path": row["export_path"],
+                    "export_metadata": json.loads(row["export_metadata_json"] or "{}"),
+                    "imported_at": row["imported_at"],
+                    "match_status": row["match_status"],
+                    "score": row["score"],
+                    "raw_asset_id": row["raw_asset_id"],
+                    "raw_path": row["raw_path"],
+                    "raw_metadata": json.loads(row["raw_metadata_json"] or "{}") if row["raw_metadata_json"] else {},
+                    "preview_path": preview_path,
+                }
+            )
+        print(json.dumps(payload, indent=2))
         return 0
 
     parser.error(f"unsupported command: {args.command}")

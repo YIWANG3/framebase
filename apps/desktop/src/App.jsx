@@ -20,9 +20,24 @@ export default function App() {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [proofMode, setProofMode] = useState(false);
   const [layoutItems, setLayoutItems] = useState([]);
+  const [selectedExportPaths, setSelectedExportPaths] = useState([]);
+  const [selectionAnchorPath, setSelectionAnchorPath] = useState(null);
   const resizeSidebar = usePaneResize(workspace.setSidebarWidth, 200, 360);
   const resizeInspector = usePaneResize((value) => workspace.setInspectorWidth(-value), -420, -240);
   const currentItems = workspace.filteredItems;
+  const orderedPaths = useMemo(() => currentItems.map((item) => item.export_path), [currentItems]);
+  const itemByExportPath = useMemo(
+    () => new Map(currentItems.map((item) => [item.export_path, item])),
+    [currentItems],
+  );
+  const selectedPathSet = useMemo(() => new Set(selectedExportPaths), [selectedExportPaths]);
+  const selectedAssetIds = useMemo(
+    () =>
+      selectedExportPaths
+        .map((path) => itemByExportPath.get(path)?.asset_id)
+        .filter((assetId) => assetId != null),
+    [selectedExportPaths, itemByExportPath],
+  );
   const selectedIndex = useMemo(
     () => currentItems.findIndex((item) => item.export_path === workspace.selectedExportPath),
     [currentItems, workspace.selectedExportPath],
@@ -37,10 +52,106 @@ export default function App() {
     gridTemplateRows: "minmax(0, 1fr)",
   };
 
+  function commitSelection(nextPaths, primaryPath, anchorPath = primaryPath) {
+    const deduped = [];
+    const seen = new Set();
+    for (const path of nextPaths) {
+      if (!path || seen.has(path) || !itemByExportPath.has(path)) continue;
+      seen.add(path);
+      deduped.push(path);
+    }
+    const nextPrimary = primaryPath && itemByExportPath.has(primaryPath) ? primaryPath : deduped[0] || null;
+    setSelectedExportPaths(deduped);
+    setSelectionAnchorPath(anchorPath && itemByExportPath.has(anchorPath) ? anchorPath : nextPrimary);
+    workspace.setSelectedExportPath(nextPrimary);
+  }
+
+  function selectSingle(path) {
+    commitSelection(path ? [path] : [], path, path);
+  }
+
+  function toggleSelection(path) {
+    if (!path) return;
+    if (selectedPathSet.has(path)) {
+      const nextPaths = selectedExportPaths.filter((itemPath) => itemPath !== path);
+      const nextPrimary =
+        workspace.selectedExportPath === path ? nextPaths[nextPaths.length - 1] || null : workspace.selectedExportPath;
+      commitSelection(nextPaths, nextPrimary, selectionAnchorPath === path ? nextPrimary : selectionAnchorPath);
+      return;
+    }
+    commitSelection([...selectedExportPaths, path], path, selectionAnchorPath || path);
+  }
+
+  function selectRange(path, append = false) {
+    if (!path) return;
+    const anchor = selectionAnchorPath || workspace.selectedExportPath || path;
+    const anchorIndex = orderedPaths.indexOf(anchor);
+    const targetIndex = orderedPaths.indexOf(path);
+    if (anchorIndex < 0 || targetIndex < 0) {
+      selectSingle(path);
+      return;
+    }
+    const start = Math.min(anchorIndex, targetIndex);
+    const end = Math.max(anchorIndex, targetIndex);
+    const rangePaths = orderedPaths.slice(start, end + 1);
+    const nextPaths = append ? [...selectedExportPaths, ...rangePaths] : rangePaths;
+    commitSelection(nextPaths, path, anchor);
+  }
+
+  function handleItemSelect(path, event) {
+    if (!event) {
+      selectSingle(path);
+      return;
+    }
+    const isToggle = event.metaKey || event.ctrlKey;
+    if (event.shiftKey) {
+      selectRange(path, isToggle);
+      return;
+    }
+    if (isToggle) {
+      toggleSelection(path);
+      return;
+    }
+    selectSingle(path);
+  }
+
+  function handleContextSelect(path) {
+    if (selectedPathSet.has(path)) {
+      workspace.setSelectedExportPath(path);
+      return;
+    }
+    selectSingle(path);
+  }
+
+  function handleSelectionGroup(paths, primaryPath, anchorPath = primaryPath) {
+    commitSelection(paths, primaryPath, anchorPath);
+  }
+
+  function clearSelection() {
+    setSelectedExportPaths([]);
+    setSelectionAnchorPath(null);
+    workspace.setSelectedExportPath(null);
+  }
+
+  function prepareDragSelection(path) {
+    if (selectedPathSet.has(path) && selectedAssetIds.length > 1) {
+      workspace.setSelectedExportPath(path);
+      return {
+        assetIds: selectedAssetIds,
+        exportPaths: selectedExportPaths,
+      };
+    }
+    selectSingle(path);
+    return {
+      assetIds: [itemByExportPath.get(path)?.asset_id].filter((assetId) => assetId != null),
+      exportPaths: [path],
+    };
+  }
+
   function selectByIndex(index) {
     const next = currentItems[index];
     if (!next) return;
-    workspace.setSelectedExportPath(next.export_path);
+    selectSingle(next.export_path);
   }
 
   function moveSelection(offset) {
@@ -155,6 +266,28 @@ export default function App() {
   }, [workspace.selectedExportPath]);
 
   useEffect(() => {
+    const validPaths = new Set(orderedPaths);
+    setSelectedExportPaths((current) => {
+      const next = current.filter((path) => validPaths.has(path));
+      const primaryPath =
+        workspace.selectedExportPath && validPaths.has(workspace.selectedExportPath) ? workspace.selectedExportPath : null;
+      if (primaryPath) {
+        if (!next.length) return [primaryPath];
+        if (!next.includes(primaryPath)) return [primaryPath];
+        return next;
+      }
+      return next;
+    });
+    setSelectionAnchorPath((current) => {
+      if (current && validPaths.has(current)) return current;
+      if (workspace.selectedExportPath && validPaths.has(workspace.selectedExportPath)) {
+        return workspace.selectedExportPath;
+      }
+      return orderedPaths[0] || null;
+    });
+  }, [orderedPaths, workspace.selectedExportPath]);
+
+  useEffect(() => {
     function shouldIgnoreKey(event) {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return false;
@@ -203,19 +336,34 @@ export default function App() {
   return (
     <div className="noise-overlay h-full overflow-hidden bg-app text-text">
       <div className="relative grid h-full min-w-0 overflow-hidden" style={layoutStyle}>
-        {showSidebar ? <Sidebar info={workspace.info} summary={workspace.summary} status={workspace.status} setStatus={(next) => {
-          const baseHistory = history.slice(0, historyIndex + 1);
-          const nextHistory = baseHistory[baseHistory.length - 1] === next ? baseHistory : [...baseHistory, next];
-          const nextIndex = nextHistory.length - 1;
-          setHistory(nextHistory);
-          setHistoryIndex(nextIndex);
-          workspace.setStatus(next);
-          void workspace.refreshAll({ nextStatus: next });
-        }} /> : <div className="bg-chrome" />}
+        {showSidebar ? <Sidebar
+          info={workspace.info}
+          summary={workspace.summary}
+          status={workspace.status}
+          setStatus={(next) => {
+            const baseHistory = history.slice(0, historyIndex + 1);
+            const nextHistory = baseHistory[baseHistory.length - 1] === next ? baseHistory : [...baseHistory, next];
+            const nextIndex = nextHistory.length - 1;
+            setHistory(nextHistory);
+            setHistoryIndex(nextIndex);
+            workspace.setStatus(next);
+            void workspace.refreshAll({ nextStatus: next, collectionId: null });
+          }}
+          collections={workspace.collections}
+          activeCollectionId={workspace.activeCollectionId}
+          onSelectCollection={workspace.selectCollection}
+          onClearCollection={workspace.clearCollection}
+          onCreateCollection={workspace.createCollection}
+          onRenameCollection={workspace.renameCollection}
+          onDeleteCollection={workspace.deleteCollection}
+          onAddToCollection={workspace.addToCollection}
+        /> : <div className="bg-chrome" />}
 
         <section className="flex min-w-0 min-h-0 flex-col overflow-hidden bg-app">
           <Toolbar
-            title={filterTitle(workspace.status)}
+            title={workspace.activeCollectionId
+              ? (workspace.collections.find((c) => c.collection_id === workspace.activeCollectionId)?.name || "Folder")
+              : filterTitle(workspace.status)}
             query={workspace.query}
             setQuery={workspace.setQuery}
             sort={workspace.sort}
@@ -232,7 +380,7 @@ export default function App() {
               const next = history[nextIndex];
               setHistoryIndex(nextIndex);
               workspace.setStatus(next);
-              void workspace.refreshAll({ nextStatus: next });
+              void workspace.refreshAll({ nextStatus: next, collectionId: null });
             }}
             onForward={() => {
               if (historyIndex >= history.length - 1) return;
@@ -240,7 +388,7 @@ export default function App() {
               const next = history[nextIndex];
               setHistoryIndex(nextIndex);
               workspace.setStatus(next);
-              void workspace.refreshAll({ nextStatus: next });
+              void workspace.refreshAll({ nextStatus: next, collectionId: null });
             }}
             canGoBack={historyIndex > 0}
             canGoForward={historyIndex < history.length - 1}
@@ -253,14 +401,26 @@ export default function App() {
               <Gallery
                 items={workspace.filteredItems}
                 selectedExportPath={workspace.selectedExportPath}
-                onSelect={workspace.setSelectedExportPath}
+                selectedExportPaths={selectedExportPaths}
+                onSelect={handleItemSelect}
+                onSelectMany={handleSelectionGroup}
+                onContextSelect={handleContextSelect}
+                onClearSelection={clearSelection}
+                onPrepareDragSelection={prepareDragSelection}
                 onLayoutItemsChange={setLayoutItems}
                 loading={workspace.browserLoading}
+                browserReady={workspace.browserReady}
                 loadingMore={workspace.browserLoadingMore}
                 hasMore={workspace.browserHasMore}
                 onLoadMore={workspace.loadMoreBrowser}
                 displayMode={displayMode}
                 thumbSize={thumbSize}
+                totalCount={Number(workspace.summary?.export_assets ?? 0)}
+                collections={workspace.collections}
+                activeCollectionId={workspace.activeCollectionId}
+                selectedAssetIds={selectedAssetIds}
+                onAddToCollection={workspace.addToCollection}
+                onRemoveFromCollection={workspace.removeFromCollection}
               />
           </div>
         </section>

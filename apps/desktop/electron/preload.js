@@ -19,6 +19,13 @@ contextBridge.exposeInMainWorld("mediaWorkspace", {
   browseExports: (options) => ipcRenderer.invoke("workspace:browse", options),
   getAssetDetail: (exportPath) => ipcRenderer.invoke("workspace:detail", exportPath),
   revealPath: (targetPath) => ipcRenderer.invoke("workspace:reveal", targetPath),
+  listCollections: () => ipcRenderer.invoke("workspace:list-collections"),
+  createCollection: (name, kind) => ipcRenderer.invoke("workspace:create-collection", name, kind),
+  updateCollection: (collectionId, updates) => ipcRenderer.invoke("workspace:update-collection", collectionId, updates),
+  deleteCollection: (collectionId) => ipcRenderer.invoke("workspace:delete-collection", collectionId),
+  collectionAddItems: (collectionId, assetIds) => ipcRenderer.invoke("workspace:collection-add-items", collectionId, assetIds),
+  collectionRemoveItems: (collectionId, assetIds) => ipcRenderer.invoke("workspace:collection-remove-items", collectionId, assetIds),
+  browseCollection: (collectionId, options) => ipcRenderer.invoke("workspace:browse-collection", collectionId, options),
   onMenuAction: (callback) => {
     ipcRenderer.removeAllListeners("workspace:menu-action");
     ipcRenderer.on("workspace:menu-action", (_event, action) => callback(action));
