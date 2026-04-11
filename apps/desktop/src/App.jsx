@@ -133,6 +133,14 @@ export default function App() {
     workspace.setSelectedExportPath(null);
   }
 
+  function applyRating(nextRating) {
+    const targetIds = selectedAssetIds.length
+      ? selectedAssetIds
+      : [itemByExportPath.get(workspace.selectedExportPath)?.asset_id].filter((assetId) => assetId != null);
+    if (!targetIds.length) return;
+    void workspace.setAssetRating(targetIds, nextRating);
+  }
+
   function prepareDragSelection(path) {
     if (selectedPathSet.has(path) && selectedAssetIds.length > 1) {
       workspace.setSelectedExportPath(path);
@@ -306,6 +314,12 @@ export default function App() {
         return;
       }
 
+      if (/^[0-5]$/.test(event.key) && (selectedAssetIds.length || workspace.selectedExportPath)) {
+        event.preventDefault();
+        applyRating(Number(event.key));
+        return;
+      }
+
       if (lightboxOpen && event.key.toLowerCase() === "p") {
         event.preventDefault();
         setProofMode((current) => !current);
@@ -331,7 +345,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [displayMode, layoutItems, lightboxOpen, proofMode, selectedIndex, currentItems, workspace.selectedExportPath]);
+  }, [displayMode, layoutItems, lightboxOpen, proofMode, selectedIndex, currentItems, workspace.selectedExportPath, selectedAssetIds]);
 
   return (
     <div className="noise-overlay h-full overflow-hidden bg-app text-text">
@@ -425,7 +439,7 @@ export default function App() {
           </div>
         </section>
 
-        {showInspector ? <Inspector detail={workspace.detail} /> : <div className="bg-chrome" />}
+        {showInspector ? <Inspector detail={workspace.detail} onRatingChange={applyRating} /> : <div className="bg-chrome" />}
 
         {showSidebar ? (
           <div

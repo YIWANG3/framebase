@@ -32,6 +32,7 @@ from .db import (
     add_collection_items,
     remove_collection_items,
     browse_collection,
+    set_asset_rating,
 )
 from .evaluation import evaluate_ground_truth
 from .ground_truth import export_ground_truth
@@ -160,6 +161,10 @@ def build_parser() -> argparse.ArgumentParser:
     col_remove = subparsers.add_parser("collection-remove-items", parents=[common])
     col_remove.add_argument("--collection-id", required=True)
     col_remove.add_argument("--asset-id", action="append", required=True)
+
+    set_rating = subparsers.add_parser("set-asset-rating", parents=[common])
+    set_rating.add_argument("--asset-id", action="append", required=True)
+    set_rating.add_argument("--rating", type=int, choices=[0, 1, 2, 3, 4, 5], required=True)
 
     browse_col = subparsers.add_parser("browse-collection", parents=[common])
     browse_col.add_argument("--collection-id", required=True)
@@ -406,6 +411,7 @@ def main() -> int:
                     "stem": row["stem"],
                     "export_path": row["export_path"],
                     "export_metadata": json.loads(row["export_metadata_json"] or "{}"),
+                    "app_rating": row["app_rating"],
                     "imported_at": row["imported_at"],
                     "match_status": row["match_status"],
                     "score": row["score"],
@@ -432,6 +438,7 @@ def main() -> int:
             "stem": row["stem"],
             "export_path": row["export_path"],
             "export_metadata": json.loads(row["export_metadata_json"] or "{}"),
+            "app_rating": row["app_rating"],
             "imported_at": row["imported_at"],
             "match_status": row["match_status"],
             "score": row["score"],
@@ -561,6 +568,11 @@ def main() -> int:
         print(json.dumps({"ok": True, "collection_id": args.collection_id, "removed": args.asset_id}))
         return 0
 
+    if args.command == "set-asset-rating":
+        updated = set_asset_rating(connection, args.asset_id, None if args.rating == 0 else args.rating)
+        print(json.dumps({"ok": True, "asset_ids": args.asset_id, "rating": args.rating, "updated": updated}))
+        return 0
+
     if args.command == "browse-collection":
         payload = []
         for row in browse_collection(connection, args.collection_id, limit=args.limit, offset=args.offset):
@@ -573,6 +585,7 @@ def main() -> int:
                     "stem": row["stem"],
                     "export_path": row["export_path"],
                     "export_metadata": json.loads(row["export_metadata_json"] or "{}"),
+                    "app_rating": row["app_rating"],
                     "imported_at": row["imported_at"],
                     "match_status": row["match_status"],
                     "score": row["score"],

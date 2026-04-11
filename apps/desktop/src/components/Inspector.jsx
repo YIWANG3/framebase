@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronRight, Star } from "lucide-react";
 import { fileName, escapePathLabel, formatBytes, formatTimestamp, localFileUrl, formatShutterSpeed, formatAperture, formatFocalLength, formatISO } from "../utils/format";
 
@@ -79,16 +79,12 @@ export default function Inspector({ detail, onRatingChange }) {
   const dimensions = exportMeta.width && exportMeta.height ? `${exportMeta.width} × ${exportMeta.height}` : "Unknown";
   const fileSize = formatBytes(exportMeta.file_size || exportMeta.size_bytes) || "Unknown";
 
-  const metaRating = Number(rawMeta.rating ?? exportMeta.rating ?? 0);
+  const metaRating = Number(detail.app_rating ?? rawMeta.rating ?? exportMeta.rating ?? 0);
   const [localRating, setLocalRating] = useState(null);
-  const [ratingAssetId, setRatingAssetId] = useState(null);
-
-  // Reset local override when switching assets
   const currentAssetId = detail.asset_id || detail.export_path;
-  if (ratingAssetId !== currentAssetId) {
-    setRatingAssetId(currentAssetId);
+  useEffect(() => {
     setLocalRating(null);
-  }
+  }, [currentAssetId]);
 
   const rating = localRating ?? metaRating;
   const gps = formatGPS(
@@ -126,7 +122,7 @@ export default function Inspector({ detail, onRatingChange }) {
               value={rating}
               onChange={(next) => {
                 setLocalRating(next);
-                onRatingChange?.(detail.export_path, next);
+                onRatingChange?.(next);
               }}
             />
           </div>

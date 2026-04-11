@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld("mediaWorkspace", {
   deleteCollection: (collectionId) => ipcRenderer.invoke("workspace:delete-collection", collectionId),
   collectionAddItems: (collectionId, assetIds) => ipcRenderer.invoke("workspace:collection-add-items", collectionId, assetIds),
   collectionRemoveItems: (collectionId, assetIds) => ipcRenderer.invoke("workspace:collection-remove-items", collectionId, assetIds),
+  setAssetRating: (assetIds, rating) => ipcRenderer.invoke("workspace:set-asset-rating", assetIds, rating),
   browseCollection: (collectionId, options) => ipcRenderer.invoke("workspace:browse-collection", collectionId, options),
   onMenuAction: (callback) => {
     ipcRenderer.removeAllListeners("workspace:menu-action");

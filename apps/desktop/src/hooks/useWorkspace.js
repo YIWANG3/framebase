@@ -226,6 +226,28 @@ export default function useWorkspace() {
     }
   }
 
+  async function setAssetRating(assetIds, rating) {
+    const normalized = Number(rating) || 0;
+    const nextRating = normalized > 0 ? normalized : null;
+    const targetIds = [...new Set((assetIds || []).filter(Boolean))];
+    if (!targetIds.length) return;
+
+    setItems((current) =>
+      current.map((item) =>
+        targetIds.includes(item.asset_id)
+          ? { ...item, app_rating: nextRating }
+          : item,
+      ),
+    );
+    setDetail((current) =>
+      current && targetIds.includes(current.asset_id)
+        ? { ...current, app_rating: nextRating }
+        : current,
+    );
+
+    await window.mediaWorkspace.setAssetRating(targetIds, normalized);
+  }
+
   function selectCollection(collectionId) {
     setActiveCollectionId(collectionId);
     void loadBrowser({ collectionId });
@@ -520,5 +542,6 @@ export default function useWorkspace() {
     deleteCollection,
     addToCollection,
     removeFromCollection,
+    setAssetRating,
   };
 }

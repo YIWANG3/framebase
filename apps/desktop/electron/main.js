@@ -503,6 +503,14 @@ ipcMain.handle("workspace:collection-remove-items", (_event, collectionId, asset
   return callSidecarJson(command);
 });
 
+ipcMain.handle("workspace:set-asset-rating", (_event, assetIds, rating) => {
+  const command = ["set-asset-rating", "--rating", String(rating)];
+  for (const id of assetIds || []) {
+    command.push("--asset-id", id);
+  }
+  return callSidecarJson(command);
+});
+
 ipcMain.handle("workspace:browse-collection", async (_event, collectionId, options) => {
   return await callSidecarJsonAsync([
     "browse-collection",

@@ -193,8 +193,6 @@ function ContextMenu({ x, y, item, collections, activeCollectionId, onAddTo, onR
 
 function CardContent({ item, selected, onSelect, onContextMenu, onPrepareDragSelection, width, height, fit, containerRef }) {
   const title = fileName(item.export_path) || item.stem;
-  const isJustified = fit === "contain";
-  const compactCaption = isJustified;
 
   return (
     <button
@@ -267,7 +265,7 @@ function CardContent({ item, selected, onSelect, onContextMenu, onPrepareDragSel
       <div className="px-0.5 pt-1.5">
         <div
           className={[
-            compactCaption ? "truncate" : "line-clamp-2-custom break-words",
+            "truncate",
             "min-w-0 text-[11px] leading-[1.3]",
             selected ? "text-text" : "text-text/92",
           ].join(" ")}

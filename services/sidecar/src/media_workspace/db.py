@@ -27,6 +27,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
 def init_db(connection: sqlite3.Connection) -> None:
     for statement in SCHEMA_STATEMENTS:
         connection.execute(statement)
+    _ensure_column(connection, "assets", "app_rating", "INTEGER")
     _ensure_column(connection, "raw_metadata_cache", "metadata_level", "TEXT NOT NULL DEFAULT 'full'")
     _ensure_column(connection, "raw_metadata_cache", "fingerprint_level", "TEXT NOT NULL DEFAULT 'head-tail'")
     _ensure_column(connection, "raw_metadata_cache", "enrichment_status", "TEXT NOT NULL DEFAULT 'done'")
@@ -794,6 +795,7 @@ def list_export_assets(
             assets.stem,
             registry.export_path AS export_path,
             assets.metadata_json AS export_metadata_json,
+            assets.app_rating,
             assets.created_at AS imported_at,
             registry.match_status,
             registry.score,
@@ -827,6 +829,7 @@ def get_export_asset_detail(connection: sqlite3.Connection, asset_id: str) -> sq
             assets.stem,
             assets.canonical_path AS export_path,
             assets.metadata_json AS export_metadata_json,
+            assets.app_rating,
             assets.created_at AS imported_at,
             registry.match_status,
             registry.score,
@@ -871,6 +874,7 @@ def get_export_asset_detail_by_path(connection: sqlite3.Connection, export_path:
             assets.stem,
             registry.export_path AS export_path,
             assets.metadata_json AS export_metadata_json,
+            assets.app_rating,
             assets.created_at AS imported_at,
             registry.match_status,
             registry.score,
@@ -1226,6 +1230,7 @@ def browse_collection(
             assets.stem,
             registry.export_path AS export_path,
             assets.metadata_json AS export_metadata_json,
+            assets.app_rating,
             assets.created_at AS imported_at,
             registry.match_status,
             registry.score,
@@ -1250,3 +1255,25 @@ def browse_collection(
         """,
         (collection_id, limit, offset),
     ).fetchall()
+
+
+def set_asset_rating(
+    connection: sqlite3.Connection,
+    asset_ids: list[str],
+    rating: int | None,
+    commit: bool = True,
+) -> int:
+    normalized = None if rating is None else max(0, min(5, int(rating)))
+    updated = 0
+    for asset_id in asset_ids:
+        updated += connection.execute(
+            """
+            UPDATE assets
+            SET app_rating = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE asset_id = ?
+            """,
+            (normalized, asset_id),
+        ).rowcount
+    if commit:
+        connection.commit()
+    return updated
