@@ -778,15 +778,24 @@ def list_export_assets(
     status: str,
     limit: int = 120,
     offset: int = 0,
+    search: str | None = None,
 ) -> list[sqlite3.Row]:
     if status == "matched":
         status_clause = "registry.match_status IN ('auto_bound', 'manual_confirmed')"
     elif status == "unmatched":
-        status_clause = "registry.match_status = 'unmatched'"
+        status_clause = "registry.match_status IN ('unmatched', 'pending_confirmation')"
     elif status == "all":
-        status_clause = "registry.match_status IN ('auto_bound', 'manual_confirmed', 'unmatched')"
+        status_clause = "registry.match_status IN ('auto_bound', 'manual_confirmed', 'unmatched', 'pending_confirmation')"
     else:
         raise ValueError(f"unsupported status: {status}")
+
+    params: list[object] = []
+    search_clause = ""
+    if search:
+        search_clause = "AND (assets.stem LIKE ? OR registry.export_path LIKE ?)"
+        like_pattern = f"%{search}%"
+        params.extend([like_pattern, like_pattern])
+    params.extend([limit, offset])
 
     return connection.execute(
         f"""
@@ -814,10 +823,11 @@ def list_export_assets(
            AND preview_entries.status = 'ready'
         WHERE assets.asset_type = 'export'
           AND {status_clause}
+          {search_clause}
         ORDER BY assets.stem, assets.canonical_path
         LIMIT ? OFFSET ?
         """,
-        (limit, offset),
+        params,
     ).fetchall()
 
 

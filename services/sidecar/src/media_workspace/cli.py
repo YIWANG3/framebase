@@ -33,11 +33,15 @@ from .db import (
     remove_collection_items,
     browse_collection,
     set_asset_rating,
+    upsert_export_asset,
+    upsert_registry,
 )
 from .evaluation import evaluate_ground_truth
 from .ground_truth import export_ground_truth
 from .job_runner import run_enrichment_job, run_import_job, run_preview_job
 from .preview_service import PreviewService
+from .metadata import extract_export_candidate
+from .models import MatchDecision
 from .reverse_lookup import resolve_export, resolve_export_batch
 from .scanner import enrich_raw_assets, scan_raw_directory
 from .watcher import ExportWatcher
@@ -125,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     browse.add_argument("--status", choices=["all", "matched", "unmatched"], required=True)
     browse.add_argument("--limit", type=int, default=120)
     browse.add_argument("--offset", type=int, default=0)
+    browse.add_argument("--search", default=None)
 
     detail = subparsers.add_parser("asset-detail", parents=[common])
     detail_group = detail.add_mutually_exclusive_group(required=True)
@@ -170,6 +175,10 @@ def build_parser() -> argparse.ArgumentParser:
     browse_col.add_argument("--collection-id", required=True)
     browse_col.add_argument("--limit", type=int, default=120)
     browse_col.add_argument("--offset", type=int, default=0)
+
+    quick_reg = subparsers.add_parser("quick-register", parents=[common])
+    quick_reg.add_argument("--export-path", type=Path, required=True)
+    quick_reg.add_argument("--origin-path", type=Path, default=None)
 
     subparsers.add_parser("cleanup-orphan-exports", parents=[common])
     subparsers.add_parser("catalog-roots", parents=[common])
@@ -401,7 +410,7 @@ def main() -> int:
 
     if args.command == "browse-exports":
         payload = []
-        for row in list_export_assets(connection, status=args.status, limit=args.limit, offset=args.offset):
+        for row in list_export_assets(connection, status=args.status, limit=args.limit, offset=args.offset, search=args.search):
             preview_path = None
             if row["preview_relative_path"]:
                 preview_path = str((catalog.root / row["preview_relative_path"]).resolve())
@@ -474,6 +483,81 @@ def main() -> int:
     if args.command == "confirm-match":
         confirm_match(connection, args.export_path, args.raw_asset_id)
         print(f"confirmed {args.export_path} -> {args.raw_asset_id}")
+        return 0
+
+    if args.command == "quick-register":
+        export_path = args.export_path.resolve()
+        candidate = extract_export_candidate(export_path, fingerprint_mode="head-only")
+        asset_id = upsert_export_asset(connection, candidate, commit=True)
+
+        # If origin-path provided, copy its source relationship instead of running matcher
+        match_status = "unmatched"
+        match_score = 0.0
+        raw_asset_id = None
+        if args.origin_path:
+            origin = str(args.origin_path.resolve())
+            origin_row = connection.execute(
+                """
+                SELECT registry.raw_asset_id, registry.score
+                FROM asset_files
+                JOIN export_lookup_registry AS registry ON registry.export_asset_id = asset_files.asset_id
+                WHERE asset_files.path = ?
+                  AND registry.raw_asset_id IS NOT NULL
+                """,
+                (origin,),
+            ).fetchone()
+            if origin_row:
+                raw_asset_id = origin_row[0]
+                match_score = origin_row[1] or 1.0
+                match_status = "auto_bound"
+
+        # If no origin match found, fall back to matcher
+        if not raw_asset_id:
+            thresholds = Thresholds()
+            decision = resolve_export(connection, export_path, thresholds=thresholds, refresh=True)
+            match_status = decision.status
+            match_score = decision.score
+            raw_asset_id = decision.raw_asset_id
+        else:
+            # Write registry entry directly
+            reg_decision = MatchDecision(
+                export_asset_id=asset_id,
+                export_path=export_path,
+                status=match_status,
+                score=match_score,
+                raw_asset_id=raw_asset_id,
+                feature_vector={},
+            )
+            upsert_registry(connection, reg_decision, commit=True)
+
+        # Generate preview for this single asset
+        preview_service = PreviewService(catalog)
+        row = connection.execute(
+            """
+            SELECT asset_id, asset_type, canonical_path, extension,
+                   json_extract(metadata_json, '$.width') AS width,
+                   json_extract(metadata_json, '$.height') AS height
+            FROM assets WHERE asset_id = ?
+            """,
+            (asset_id,),
+        ).fetchone()
+        if row:
+            try:
+                from .db import upsert_preview_entry
+                preview_result = preview_service.generate_for_row(row, kind="preview", force=False)
+                upsert_preview_entry(connection, asset_id, "preview", preview_result.relative_path, preview_result.width, preview_result.height, preview_result.status)
+                connection.commit()
+            except Exception as e:
+                import sys
+                print(f"Warning: preview generation failed: {e}", file=sys.stderr)
+
+        print(json.dumps({
+            "asset_id": asset_id,
+            "export_path": str(export_path),
+            "match_status": match_status,
+            "score": match_score,
+            "raw_asset_id": raw_asset_id,
+        }))
         return 0
 
     if args.command == "cleanup-orphan-exports":

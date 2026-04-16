@@ -140,20 +140,21 @@
   .handle-left::before,.handle-right::before { top:50%;left:50%;transform:translate(-50%,-50%);width:var(--handle-weight);height:var(--edge-handle); }
 
   /* Angle ruler */
-  .angle-ruler { margin-top: 16px; display: flex; align-items: center; gap: 10px; z-index: 2; }
+  .angle-ruler { margin-top: 10px; display: flex; align-items: center; gap: 8px; z-index: 2; }
   .angle-ruler.hidden { display: none; }
-  .ruler-track { width: 300px; height: 28px; position: relative; display: flex; align-items: center; }
+  .ruler-track { width: 220px; height: 18px; position: relative; display: flex; align-items: center; }
   .ruler-ticks { width: 100%; height: 100%; position: relative; }
-  .ruler-tick { position: absolute; bottom: 0; width: 1px; background: rgba(255,255,255,0.12); }
-  .ruler-tick-label { position: absolute; bottom: -14px; font-size: 9px; color: var(--chrome-dim); transform: translateX(-50%); font-variant-numeric: tabular-nums; }
-  .ruler-center-line { position: absolute; left: 50%; top: -4px; bottom: -2px; width: 1px; background: var(--brass); opacity: 0.6; }
+  .ruler-tick { position: absolute; bottom: 0; width: 0.5px; background: rgba(255,255,255,0.10); }
+  .ruler-tick.major { width: 1px; background: rgba(255,255,255,0.20); }
+  .ruler-tick-label { position: absolute; bottom: -12px; font-size: 8px; color: var(--chrome-dim); transform: translateX(-50%); font-variant-numeric: tabular-nums; }
+  .ruler-center-line { position: absolute; left: 50%; top: -2px; bottom: -1px; width: 1px; background: var(--brass); opacity: 0.5; }
   .ruler-thumb {
     position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
-    width: 14px; height: 14px; border-radius: 50%; background: var(--white-pure);
-    box-shadow: 0 1px 6px rgba(0,0,0,0.5); cursor: grab; z-index: 3;
+    width: 10px; height: 10px; border-radius: 50%; background: var(--white-pure);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5); cursor: grab; z-index: 3;
   }
-  .ruler-thumb:hover { box-shadow: 0 1px 10px rgba(0,0,0,0.6), 0 0 0 3px rgba(255,255,255,0.06); }
-  .ruler-value { font-size: 12px; color: var(--white); font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; }
+  .ruler-thumb:hover { box-shadow: 0 1px 8px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.06); }
+  .ruler-value { font-size: 11px; color: var(--white); font-variant-numeric: tabular-nums; min-width: 32px; text-align: center; }
 
   /* Text overlay */
   .text-overlay { position: absolute; inset: 0; display: none; z-index: 2; }
@@ -512,15 +513,6 @@
               <div class="handle-edge handle-left"></div><div class="handle-edge handle-right"></div>
             </div>
           </div>
-          <div class="text-overlay" id="textOverlay">
-            <div class="text-element text-element-selected">HELLO WORLD
-              <div class="te-handle tl"></div><div class="te-handle tr"></div><div class="te-handle bl"></div><div class="te-handle br"></div>
-            </div>
-            <div class="text-secondary">Subtitle goes here</div>
-          </div>
-          <div class="ai-paint-overlay" id="aiPaintOverlay">
-            <div class="paint-mask"></div><div class="brush-cursor"></div>
-          </div>
         </div>
         <div class="angle-ruler" id="angleRuler">
           <div class="ruler-track"><div class="ruler-ticks" id="rulerTicks"></div><div class="ruler-center-line"></div><div class="ruler-thumb" id="rulerThumb"></div></div>
@@ -541,16 +533,15 @@
                 <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:11px;height:8px"></span></span>Original</button>
                 <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:10px;height:10px"></span></span>1 : 1</button>
                 <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:12px;height:8px"></span></span>3 : 2</button>
+                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:8px;height:12px"></span></span>2 : 3</button>
                 <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:12px;height:9px"></span></span>4 : 3</button>
+                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:9px;height:12px"></span></span>3 : 4</button>
                 <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:11px;height:9px"></span></span>5 : 4</button>
-                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:14px;height:8px"></span></span>16 : 9</button>
-                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:14px;height:6px"></span></span>21 : 9</button>
                 <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:9px;height:11px"></span></span>4 : 5</button>
-                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:7px;height:12px"></span></span>9 : 16</button>
-                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:14px;height:7px"></span></span>1.91 : 1</button>
-                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:8px;height:11px"></span></span>5 : 7</button>
-                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:9px;height:11px"></span></span>8.5 : 11</button>
-                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:8px;height:11px"></span></span>A4</button>
+                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:14px;height:8px"></span></span>16 : 9</button>
+                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:8px;height:14px"></span></span>9 : 16</button>
+                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:14px;height:6px"></span></span>2.35 : 1</button>
+                <button class="ratio-btn"><span class="ri"><span class="ri-rect" style="width:6px;height:14px"></span></span>1 : 2.35</button>
               </div>
             </div>
             <div class="section">
@@ -565,110 +556,29 @@
           </div>
         </div>
 
-        <!-- TEXT -->
-        <div class="fpanel" id="fp-text">
+        <!-- OTHER TOOLS -->
+        <div class="fpanel" id="fp-other">
           <div class="fpanel-scroll">
             <div class="section">
-              <div class="section-title">Font</div>
-              <select class="font-select"><option>DM Sans</option><option>SF Pro Display</option><option>Helvetica Neue</option></select>
-              <div class="size-row"><input class="size-input" type="text" value="48"><span class="size-unit">px</span></div>
-            </div>
-            <div class="section">
-              <div class="section-title">Color</div>
-              <div class="color-grid">
-                <button class="color-swatch active-swatch" style="background:#fff"></button>
-                <button class="color-swatch" style="background:#000;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.15)"></button>
-                <button class="color-swatch" style="background:#d4a755"></button>
-                <button class="color-swatch" style="background:#ef4444"></button>
-                <button class="color-swatch" style="background:#3b82f6"></button>
-                <button class="color-swatch" style="background:#22c55e"></button>
-                <button class="color-swatch" style="background:#f59e0b"></button>
-                <button class="color-swatch" style="background:#8b5cf6"></button>
-                <button class="color-custom" title="Custom"></button>
-              </div>
-            </div>
-            <div class="section">
-              <div class="section-title">Style</div>
-              <div class="style-row">
-                <button class="style-btn active"><strong>B</strong></button>
-                <button class="style-btn"><em>I</em></button>
-                <button class="style-btn" style="text-decoration:underline">U</button>
-              </div>
-              <div class="align-row">
-                <button class="style-btn"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="3" y1="6" y2="6"/><line x1="15" x2="3" y1="12" y2="12"/><line x1="17" x2="3" y1="18" y2="18"/></svg></button>
-                <button class="style-btn active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="3" y1="6" y2="6"/><line x1="17" x2="7" y1="12" y2="12"/><line x1="19" x2="5" y1="18" y2="18"/></svg></button>
-                <button class="style-btn"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="3" y1="6" y2="6"/><line x1="21" x2="9" y1="12" y2="12"/><line x1="21" x2="7" y1="18" y2="18"/></svg></button>
-              </div>
-            </div>
-            <div class="section">
-              <div class="section-title">Opacity</div>
-              <div class="opacity-row">
-                <div class="opacity-track"><div class="opacity-fill"></div><div class="opacity-thumb"></div></div>
-                <span class="opacity-val">80%</span>
-              </div>
-            </div>
-          </div>
-          <div class="panel-footer">
-            <button class="btn-action btn-cancel-action" title="Delete selected text"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
-          </div>
-        </div>
-
-        <!-- AI REPAINT -->
-        <div class="fpanel" id="fp-repaint">
-          <div class="fpanel-scroll">
-            <div class="section">
-              <div class="section-title">Brush</div>
-              <div class="brush-row">
-                <button class="brush-btn"><span class="brush-dot" style="width:6px;height:6px"></span></button>
-                <button class="brush-btn active"><span class="brush-dot" style="width:10px;height:10px"></span></button>
-                <button class="brush-btn"><span class="brush-dot" style="width:14px;height:14px"></span></button>
-              </div>
-              <div class="link-btns"><button class="link-btn">Clear</button><button class="link-btn">Invert</button></div>
-            </div>
-            <div class="section">
-              <div class="section-title">Mode</div>
+              <div class="section-title">Other Tools</div>
               <div class="mode-row">
-                <button class="mode-btn active">Replace</button>
-                <button class="mode-btn">Fill</button>
-                <button class="mode-btn">Remove</button>
+                <button class="mode-btn active">Text</button>
+                <button class="mode-btn">AI Repaint</button>
+                <button class="mode-btn">AI Generate</button>
               </div>
             </div>
             <div class="section">
-              <div class="section-title">Prompt</div>
-              <div class="prompt-wrap">
-                <textarea class="prompt-textarea" placeholder="Describe what to paint..."></textarea>
-                <div class="prompt-bottom"><button class="btn-generate"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/></svg>Generate</button></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- AI GENERATE -->
-        <div class="fpanel" id="fp-generate">
-          <div class="fpanel-scroll">
-            <div class="section">
-              <div class="section-title">Prompt</div>
-              <div class="prompt-wrap">
-                <textarea class="prompt-textarea" placeholder="Describe what to generate...">A dreamy watercolor version with soft pastel tones</textarea>
-                <div class="prompt-bottom"><button class="btn-generate"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/></svg>Generate</button></div>
+              <div class="section-title">Planned Scope</div>
+              <div style="font-size:12px; line-height:1.5; color:var(--white);">
+                Crop is the first production feature. The remaining editing tools are grouped here as one entry for now, so the Electron build can stay focused on the crop flow first.
               </div>
             </div>
             <div class="section">
-              <div class="section-title">Style</div>
+              <div class="section-title">Next Up</div>
               <div class="gen-chip-grid">
-                <button class="gen-chip active">Realistic</button>
-                <button class="gen-chip">Illustration</button>
-                <button class="gen-chip">Watercolor</button>
-                <button class="gen-chip">Oil Paint</button>
-                <button class="gen-chip">Sketch</button>
-                <button class="gen-chip">Anime</button>
-              </div>
-            </div>
-            <div class="section">
-              <div class="section-title">Strength</div>
-              <div class="slider-row">
-                <div class="slider-track"><div class="slider-fill slider-fill-ai"></div><div class="slider-thumb" style="left:calc(65% - 5px)"></div></div>
-                <span class="slider-val">65%</span>
+                <button class="gen-chip active">Single grouped menu item</button>
+                <button class="gen-chip">Hook actual tools later</button>
+                <button class="gen-chip">Avoid scope creep in v1</button>
               </div>
             </div>
           </div>
@@ -692,17 +602,8 @@
         <button class="tool-tab active" data-tool="crop" data-tip="Crop">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>
         </button>
-        <button class="tool-tab" data-tool="text" data-tip="Text">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>
-        </button>
-        <div class="tab-divider"></div>
-        <button class="tool-tab" data-tool="repaint" data-tip="AI Repaint">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08"/><path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z"/></svg>
-          <span class="ai-dot"></span>
-        </button>
-        <button class="tool-tab" data-tool="generate" data-tip="AI Generate">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/></svg>
-          <span class="ai-dot"></span>
+        <button class="tool-tab" data-tool="other" data-tip="Other Tools">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/><circle cx="5" cy="12" r="1.5"/></svg>
         </button>
     </div>
   </div>
@@ -739,21 +640,23 @@
 </div>
 
 <script>
-  // Ruler ticks
+  // Ruler ticks — 1° per tick
   const rt = document.getElementById('rulerTicks');
-  for (let d = -45; d <= 45; d += 5) {
+  for (let d = -45; d <= 45; d += 1) {
     const t = document.createElement('div'); t.className = 'ruler-tick';
     const p = ((d+45)/90)*100; t.style.left = p+'%';
-    t.style.height = (d%15===0)?'12px':(d%10===0)?'8px':'5px';
-    if (d%15===0) { const l = document.createElement('span'); l.className='ruler-tick-label'; l.style.left=p+'%'; l.textContent=d+'°'; rt.appendChild(l); }
+    if (d % 10 === 0) { t.classList.add('major'); t.style.height = '10px'; }
+    else if (d % 5 === 0) { t.style.height = '6px'; }
+    else { t.style.height = '3px'; }
+    if (d % 15 === 0) { const l = document.createElement('span'); l.className='ruler-tick-label'; l.style.left=p+'%'; l.textContent=d+'°'; rt.appendChild(l); }
     rt.appendChild(t);
   }
 
   // Tool switch — now uses .tool-tab
   const tabs = document.querySelectorAll('.tool-tab');
-  const fps = { crop:document.getElementById('fp-crop'), text:document.getElementById('fp-text'), repaint:document.getElementById('fp-repaint'), generate:document.getElementById('fp-generate') };
-  const ovs = { crop:document.getElementById('cropOverlay'), text:document.getElementById('textOverlay'), repaint:document.getElementById('aiPaintOverlay'), generate:null };
-  const ai = new Set(['repaint','generate']);
+  const fps = { crop:document.getElementById('fp-crop'), other:document.getElementById('fp-other') };
+  const ovs = { crop:document.getElementById('cropOverlay'), other:null };
+  const ai = new Set();
   const ar = document.getElementById('angleRuler');
 
   function sw(n) {
