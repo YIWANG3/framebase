@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Minus, Plus, SwatchBook, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Minus, Pencil, Plus, SwatchBook, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fileName, localFileUrl } from "../utils/format";
 
@@ -55,6 +55,7 @@ export default function Lightbox({
   currentIndex,
   proofMode,
   onToggleProof,
+  onEdit,
   onClose,
   onIndexChange,
 }) {
@@ -324,6 +325,15 @@ export default function Lightbox({
           </div>
         </div>
         <div className="pointer-events-auto flex items-center gap-2">
+          <ActionPill
+            icon={Pencil}
+            label="Edit"
+            shortcut="E"
+            onClick={(event) => {
+              event.stopPropagation();
+              onEdit?.(currentItem);
+            }}
+          />
           <ActionPill
             icon={SwatchBook}
             label="Proof"

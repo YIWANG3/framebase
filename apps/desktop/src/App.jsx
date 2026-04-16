@@ -8,6 +8,7 @@ import Gallery from "./components/Gallery";
 import Inspector from "./components/Inspector";
 import ImportOverlay from "./components/ImportOverlay";
 import Lightbox from "./components/Lightbox";
+import EditorOverlay from "./components/EditorOverlay";
 
 export default function App() {
   const workspace = useWorkspace();
@@ -18,6 +19,7 @@ export default function App() {
   const [history, setHistory] = useState(["all"]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [editorItem, setEditorItem] = useState(null);
   const [proofMode, setProofMode] = useState(false);
   const [layoutItems, setLayoutItems] = useState([]);
   const [selectedExportPaths, setSelectedExportPaths] = useState([]);
@@ -115,6 +117,13 @@ export default function App() {
     selectSingle(path);
   }
 
+  function openLightboxForPath(path) {
+    if (!path) return;
+    selectSingle(path);
+    setProofMode(false);
+    setLightboxOpen(true);
+  }
+
   function handleContextSelect(path) {
     if (selectedPathSet.has(path)) {
       workspace.setSelectedExportPath(path);
@@ -207,7 +216,7 @@ export default function App() {
     }
 
     // --- Grid: left/right = ±1, up/down = ±columnCount ---
-    if (displayMode === "grid") {
+    if (displayMode === "grid" || displayMode === "tiles") {
       if (direction === "left" || direction === "right") {
         moveSelection(isForward ? 1 : -1);
       } else {
@@ -266,10 +275,22 @@ export default function App() {
     }
   }
 
+  function openEditor(target) {
+    const nextItem =
+      typeof target === "string"
+        ? itemByExportPath.get(target)
+        : target?.export_path
+          ? itemByExportPath.get(target.export_path) || target
+          : itemByExportPath.get(workspace.selectedExportPath);
+    if (!nextItem) return;
+    setEditorItem(nextItem);
+  }
+
   useEffect(() => {
     if (!workspace.selectedExportPath) {
       setLightboxOpen(false);
       setProofMode(false);
+      setEditorItem(null);
     }
   }, [workspace.selectedExportPath]);
 
@@ -304,6 +325,7 @@ export default function App() {
     }
 
     function handleKeyDown(event) {
+      if (editorItem) return;
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       if (shouldIgnoreKey(event)) return;
 
@@ -317,6 +339,12 @@ export default function App() {
       if (/^[0-5]$/.test(event.key) && (selectedAssetIds.length || workspace.selectedExportPath)) {
         event.preventDefault();
         applyRating(Number(event.key));
+        return;
+      }
+
+      if (lightboxOpen && event.key.toLowerCase() === "e") {
+        event.preventDefault();
+        openEditor();
         return;
       }
 
@@ -345,7 +373,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [displayMode, layoutItems, lightboxOpen, proofMode, selectedIndex, currentItems, workspace.selectedExportPath, selectedAssetIds]);
+  }, [currentItems, displayMode, editorItem, layoutItems, lightboxOpen, openEditor, proofMode, selectedIndex, workspace.selectedExportPath, selectedAssetIds]);
 
   return (
     <div className="noise-overlay h-full overflow-hidden bg-app text-text">
@@ -417,6 +445,7 @@ export default function App() {
                 selectedExportPath={workspace.selectedExportPath}
                 selectedExportPaths={selectedExportPaths}
                 onSelect={handleItemSelect}
+                onOpen={openLightboxForPath}
                 onSelectMany={handleSelectionGroup}
                 onContextSelect={handleContextSelect}
                 onClearSelection={clearSelection}
@@ -435,6 +464,7 @@ export default function App() {
                 selectedAssetIds={selectedAssetIds}
                 onAddToCollection={workspace.addToCollection}
                 onRemoveFromCollection={workspace.removeFromCollection}
+                onEdit={openEditor}
               />
           </div>
         </section>
@@ -467,11 +497,20 @@ export default function App() {
         currentIndex={Math.max(selectedIndex, 0)}
         proofMode={proofMode}
         onToggleProof={() => setProofMode((current) => !current)}
+        onEdit={openEditor}
         onClose={() => {
           setProofMode(false);
           setLightboxOpen(false);
         }}
         onIndexChange={selectByIndex}
+      />
+      <EditorOverlay
+        open={!!editorItem}
+        item={editorItem}
+        onClose={() => setEditorItem(null)}
+        onSaveComplete={async () => {
+          await workspace.refreshAll?.();
+        }}
       />
     </div>
   );

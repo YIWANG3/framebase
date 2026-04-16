@@ -1,12 +1,44 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { LoaderCircle, Images, FolderPlus, FolderMinus, Folder, ChevronRight, Eye } from "lucide-react";
+import { createPortal } from "react-dom";
+import { LoaderCircle, Images, FolderPlus, FolderMinus, Folder, ChevronRight, Eye, Pencil } from "lucide-react";
 import { fileName, galleryInfoLabel, buildJustifiedLayout, localFileUrl } from "../utils/format";
 import PreviewImage from "./PreviewImage";
 
 const GAP = 12;
+const TILE_GAP = 2;
 const CAPTION_HEIGHT = 42;
 const GRID_ASPECT_RATIO = 4 / 3;
+const TILE_ASPECT_RATIO = 3 / 4;
 const OVERSCAN_PX = 800;
+const VIEW_PADDING = 8;
+
+function buildGridLayout(items, containerWidth, thumbSize, gap, aspectRatio, captionHeight, horizontalPadding) {
+  if (!containerWidth) return null;
+  const availableWidth = Math.max(containerWidth - horizontalPadding * 2, thumbSize);
+  const columnCount = Math.max(1, Math.floor((availableWidth + gap) / (thumbSize + gap)));
+  const cellWidth = (availableWidth - gap * (columnCount - 1)) / columnCount;
+  const imgHeight = cellWidth / aspectRatio;
+  const cardHeight = imgHeight + captionHeight;
+  const rowStride = cardHeight + gap;
+  const totalRows = Math.ceil(items.length / columnCount);
+  const positions = [];
+  for (let idx = 0; idx < items.length; idx += 1) {
+    const row = Math.floor(idx / columnCount);
+    const col = idx % columnCount;
+    positions.push({
+      item: items[idx],
+      left: col * (cellWidth + gap),
+      top: row * rowStride,
+      width: cellWidth,
+      imgHeight,
+      captionHeight,
+    });
+  }
+  return {
+    totalHeight: Math.max(0, totalRows * rowStride - gap),
+    positions,
+  };
+}
 
 function createDragPreview(sourceElement, count) {
   const rect = sourceElement.getBoundingClientRect();
@@ -126,19 +158,25 @@ function MenuItem({ icon: Icon, label, shortcut, onClick, children }) {
   );
 }
 
-function ContextMenu({ x, y, item, collections, activeCollectionId, onAddTo, onRemoveFrom, onReveal, onClose }) {
+function ContextMenu({ x, y, item, collections, activeCollectionId, onAddTo, onRemoveFrom, onReveal, onEdit, onClose }) {
   const ref = useRef(null);
   useEffect(() => {
-    function handleClick(e) {
+    function handlePointerDown(e) {
+      if (e.button !== 0) return;
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    }
+    function handleContextMenu(e) {
       if (ref.current && !ref.current.contains(e.target)) onClose();
     }
     function handleKey(e) {
       if (e.key === "Escape") onClose();
     }
-    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("keydown", handleKey);
     return () => {
-      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("contextmenu", handleContextMenu);
       document.removeEventListener("keydown", handleKey);
     };
   }, [onClose]);
@@ -158,12 +196,13 @@ function ContextMenu({ x, y, item, collections, activeCollectionId, onAddTo, onR
   const manualFolders = (collections || []).filter((c) => c.kind === "manual");
   const inActiveFolder = !!activeCollectionId;
 
-  return (
+  return createPortal(
     <div
       ref={(el) => { ref.current = el; menuRef.current = el; }}
-      className="fixed z-50 min-w-[200px] rounded-lg border border-border/60 bg-chrome py-1 shadow-xl"
+      className="fixed z-[12000] min-w-[200px] rounded-lg border border-border/60 bg-chrome py-1 shadow-xl"
       style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
     >
+      <MenuItem icon={Pencil} label="Edit…" shortcut="E" onClick={() => { onEdit?.(item.export_path); onClose(); }} />
       <MenuItem icon={Eye} label="Reveal in Finder" shortcut="⌘↵" onClick={() => { onReveal?.(item.export_path); onClose(); }} />
 
       <div className="my-1 border-t border-border/40" />
@@ -187,17 +226,33 @@ function ContextMenu({ x, y, item, collections, activeCollectionId, onAddTo, onR
       {inActiveFolder && (
         <MenuItem icon={FolderMinus} label="Remove from Folder" onClick={() => { onRemoveFrom(); onClose(); }} />
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
-function CardContent({ item, selected, onSelect, onContextMenu, onPrepareDragSelection, width, height, fit, containerRef }) {
+function CardContent({
+  item,
+  selected,
+  onSelect,
+  onOpen,
+  onContextMenu,
+  onPrepareDragSelection,
+  width,
+  height,
+  fit,
+  containerRef,
+  captionHeight = CAPTION_HEIGHT,
+  compact = false,
+}) {
   const title = fileName(item.export_path) || item.stem;
+  const totalHeight = height + captionHeight;
 
   return (
     <button
       type="button"
       onClick={(event) => onSelect(item.export_path, event)}
+      onDoubleClick={() => onOpen?.(item.export_path)}
       onContextMenu={onContextMenu}
       onDragStart={(event) => {
         const payload = onPrepareDragSelection?.(item.export_path) || {
@@ -238,22 +293,23 @@ function CardContent({ item, selected, onSelect, onContextMenu, onPrepareDragSel
       className="group absolute text-left focus:outline-none"
       style={{
         width: `${width}px`,
-        height: `${height + CAPTION_HEIGHT}px`,
+        height: `${totalHeight}px`,
         minWidth: 0,
       }}
     >
       <div
         className={[
-          "relative overflow-hidden rounded-md transition-all duration-200",
+          "relative overflow-hidden transition-all duration-200",
+          compact ? "rounded-none" : "rounded-md",
           selected
             ? "ring-2 ring-accent shadow-glow"
             : "ring-1 ring-border/40 group-hover:ring-accent/40 group-hover:shadow-card-hover",
         ].join(" ")}
         style={{ height: `${height}px` }}
       >
-        {item.preview_path ? (
+        {item.preview_path || item.export_path ? (
           <PreviewImage
-            src={localFileUrl(item.preview_path)}
+            src={localFileUrl(item.preview_path || item.export_path)}
             alt={item.stem}
             scrollRootRef={containerRef}
             fit={fit}
@@ -262,20 +318,22 @@ function CardContent({ item, selected, onSelect, onContextMenu, onPrepareDragSel
           <div className="flex h-full w-full items-center justify-center text-[11px] text-muted">No preview</div>
         )}
       </div>
-      <div className="px-0.5 pt-1.5">
-        <div
-          className={[
-            "truncate",
-            "min-w-0 text-[11px] leading-[1.3]",
-            selected ? "text-text" : "text-text/92",
-          ].join(" ")}
-        >
-          {title}
+      {captionHeight > 0 ? (
+        <div className="px-0.5 pt-1.5">
+          <div
+            className={[
+              "truncate",
+              "min-w-0 text-[11px] leading-[1.3]",
+              selected ? "text-text" : "text-text/92",
+            ].join(" ")}
+          >
+            {title}
+          </div>
+          <div className={`mt-0.5 truncate text-[10px] leading-[1.3] ${selected ? "text-muted" : "text-muted2"}`}>
+            {galleryInfoLabel(item)}
+          </div>
         </div>
-        <div className={`mt-0.5 truncate text-[10px] leading-[1.3] ${selected ? "text-muted" : "text-muted2"}`}>
-          {galleryInfoLabel(item)}
-        </div>
-      </div>
+      ) : null}
     </button>
   );
 }
@@ -285,6 +343,7 @@ export default function Gallery({
   selectedExportPath,
   selectedExportPaths,
   onSelect,
+  onOpen,
   onSelectMany,
   onContextSelect,
   onClearSelection,
@@ -303,6 +362,7 @@ export default function Gallery({
   selectedAssetIds,
   onAddToCollection,
   onRemoveFromCollection,
+  onEdit,
 }) {
   const containerRef = useRef(null);
   const scrollRafRef = useRef(0);
@@ -314,6 +374,17 @@ export default function Gallery({
   const [marquee, setMarquee] = useState(null);
   const selectionBaseRef = useRef([]);
   const selectedPathSet = useMemo(() => new Set(selectedExportPaths || []), [selectedExportPaths]);
+  const isTileMode = displayMode === "tiles";
+
+  function openContextMenu(event, item) {
+    event.preventDefault();
+    event.stopPropagation();
+    const contextAssetIds = selectedPathSet.has(item.export_path)
+      ? selectedAssetIds
+      : [item.asset_id];
+    onContextSelect?.(item.export_path);
+    setContextMenu({ x: event.clientX, y: event.clientY, item, assetIds: contextAssetIds });
+  }
 
   useEffect(() => {
     if (!containerRef.current) return undefined;
@@ -361,36 +432,17 @@ export default function Gallery({
   }
 
   const gridLayout = useMemo(() => {
-    if (!containerWidth) return null;
-    const availableWidth = Math.max(containerWidth - 24, thumbSize);
-    const columnCount = Math.max(1, Math.floor((availableWidth + GAP) / (thumbSize + GAP)));
-    const cellWidth = (availableWidth - GAP * (columnCount - 1)) / columnCount;
-    const imgHeight = cellWidth / GRID_ASPECT_RATIO;
-    const cardHeight = imgHeight + CAPTION_HEIGHT;
-    const rowStride = cardHeight + GAP;
-    const totalRows = Math.ceil(items.length / columnCount);
-    const positions = [];
-    for (let idx = 0; idx < items.length; idx += 1) {
-      const row = Math.floor(idx / columnCount);
-      const col = idx % columnCount;
-      positions.push({
-        item: items[idx],
-        left: col * (cellWidth + GAP),
-        top: row * rowStride,
-        width: cellWidth,
-        imgHeight,
-      });
-    }
-    return {
-      totalHeight: Math.max(0, totalRows * rowStride - GAP),
-      positions,
-    };
+    return buildGridLayout(items, containerWidth, thumbSize, GAP, GRID_ASPECT_RATIO, CAPTION_HEIGHT, VIEW_PADDING);
+  }, [containerWidth, items, thumbSize]);
+
+  const tileLayout = useMemo(() => {
+    return buildGridLayout(items, containerWidth, thumbSize, TILE_GAP, TILE_ASPECT_RATIO, 0, 0);
   }, [containerWidth, items, thumbSize]);
 
   const justifiedLayoutData = useMemo(() => {
     if (!containerWidth) return null;
     const rowHeight = Math.round(thumbSize * 0.66);
-    const layout = buildJustifiedLayout(items, Math.max(containerWidth - 24, 0), rowHeight, GAP, CAPTION_HEIGHT);
+    const layout = buildJustifiedLayout(items, Math.max(containerWidth - VIEW_PADDING * 2, 0), rowHeight, GAP, CAPTION_HEIGHT);
     if (!layout.rows.length) return null;
     const positions = layout.rows.flat();
     const rowTops = layout.rows.map((row) => row[0]?.top ?? 0);
@@ -408,7 +460,7 @@ export default function Gallery({
 
   const waterfallLayout = useMemo(() => {
     if (!containerWidth) return null;
-    const availableWidth = Math.max(containerWidth - 24, thumbSize);
+    const availableWidth = Math.max(containerWidth - VIEW_PADDING * 2, thumbSize);
     const columnCount = Math.max(1, Math.floor((availableWidth + GAP) / (thumbSize + GAP)));
     const colWidth = (availableWidth - GAP * (columnCount - 1)) / columnCount;
     const colHeights = new Array(columnCount).fill(0);
@@ -437,6 +489,8 @@ export default function Gallery({
   const layoutItems = useMemo(() => {
     const source = displayMode === "justified"
       ? justifiedLayoutData?.positions
+      : displayMode === "tiles"
+        ? tileLayout?.positions
       : displayMode === "waterfall"
         ? waterfallLayout?.positions
         : gridLayout?.positions;
@@ -446,9 +500,9 @@ export default function Gallery({
       left: entry.left,
       top: entry.top,
       width: entry.width,
-      height: (entry.height ?? entry.imgHeight) + CAPTION_HEIGHT,
+      height: (entry.height ?? entry.imgHeight) + (entry.captionHeight ?? CAPTION_HEIGHT),
     }));
-  }, [displayMode, gridLayout, justifiedLayoutData, waterfallLayout]);
+  }, [displayMode, gridLayout, justifiedLayoutData, tileLayout, waterfallLayout]);
 
   useEffect(() => {
     onLayoutItemsChange?.(layoutItems);
@@ -489,6 +543,16 @@ export default function Gallery({
     return { totalHeight: gridLayout.totalHeight, visibleItems };
   }, [displayMode, gridLayout, scrollTop, viewportHeight]);
 
+  const tileMetrics = useMemo(() => {
+    if (displayMode !== "tiles" || !tileLayout) return null;
+    const visTop = scrollTop - OVERSCAN_PX;
+    const visBottom = scrollTop + viewportHeight + OVERSCAN_PX;
+    const visibleItems = tileLayout.positions.filter(
+      (entry) => entry.top + entry.imgHeight >= visTop && entry.top <= visBottom,
+    );
+    return { totalHeight: tileLayout.totalHeight, visibleItems };
+  }, [displayMode, tileLayout, scrollTop, viewportHeight]);
+
   const justifiedMetrics = useMemo(() => {
     if (displayMode !== "justified" || !justifiedLayoutData) return null;
     const visTop = scrollTop - OVERSCAN_PX;
@@ -510,8 +574,9 @@ export default function Gallery({
   }, [displayMode, waterfallLayout, scrollTop, viewportHeight]);
 
   const metrics = displayMode === "justified" ? justifiedMetrics
-    : displayMode === "waterfall" ? waterfallMetrics
-      : gridMetrics;
+    : displayMode === "tiles" ? tileMetrics
+      : displayMode === "waterfall" ? waterfallMetrics
+        : gridMetrics;
 
   const totalHeight = metrics
     ? displayMode === "justified" ? Math.ceil(metrics.containerHeight) : metrics.totalHeight
@@ -553,27 +618,23 @@ export default function Gallery({
     }
 
     function handlePointerMove(event) {
+      if (!marquee) return;
       const point = getContentPoint(event.clientX, event.clientY);
-      setMarquee((current) => {
-        if (!current) return current;
-        const moved =
-          current.moved ||
-          Math.abs(point.x - current.originX) > 4 ||
-          Math.abs(point.y - current.originY) > 4;
-        const nextMarquee = { ...current, currentX: point.x, currentY: point.y, moved };
-        updateSelection(nextMarquee);
-        return nextMarquee;
-      });
+      const moved =
+        marquee.moved ||
+        Math.abs(point.x - marquee.originX) > 4 ||
+        Math.abs(point.y - marquee.originY) > 4;
+      const nextMarquee = { ...marquee, currentX: point.x, currentY: point.y, moved };
+      setMarquee(nextMarquee);
+      updateSelection(nextMarquee);
     }
 
     function handlePointerUp() {
-      setMarquee((current) => {
-        if (!current) return null;
-        if (!current.moved && !current.additive) {
-          onClearSelection?.();
-        }
-        return null;
-      });
+      if (!marquee) return;
+      if (!marquee.moved && !marquee.additive) {
+        onClearSelection?.();
+      }
+      setMarquee(null);
     }
 
     window.addEventListener("pointermove", handlePointerMove);
@@ -612,7 +673,6 @@ export default function Gallery({
         if (event.target instanceof Element && event.target.closest("[data-gallery-item='true']")) {
           return;
         }
-        closeContextMenu();
         const point = getContentPoint(event.clientX, event.clientY);
         const additive = event.metaKey || event.ctrlKey;
         selectionBaseRef.current = additive ? selectedExportPaths || [] : [];
@@ -626,7 +686,7 @@ export default function Gallery({
           anchorPath: selectedExportPath || selectedExportPaths?.[0] || null,
         });
       }}
-      className="h-full select-none overflow-auto bg-app px-3 py-3"
+      className={`h-full select-none overflow-auto bg-app ${isTileMode ? "px-0 py-0" : "px-2 py-2"}`}
     >
       <div className="relative" style={{ height: `${totalHeight}px` }}>
         {visibleItems.map((entry) => {
@@ -638,19 +698,15 @@ export default function Gallery({
                 item={item}
                 selected={selectedPathSet.has(item.export_path)}
                 onSelect={onSelect}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  const contextAssetIds = selectedPathSet.has(item.export_path)
-                    ? selectedAssetIds
-                    : [item.asset_id];
-                  onContextSelect?.(item.export_path);
-                  setContextMenu({ x: e.clientX, y: e.clientY, item, assetIds: contextAssetIds });
-                }}
+                onOpen={onOpen}
+                onContextMenu={(event) => openContextMenu(event, item)}
                 onPrepareDragSelection={onPrepareDragSelection}
                 width={entry.width}
                 height={imgHeight}
                 fit={fit}
                 containerRef={containerRef}
+                captionHeight={entry.captionHeight ?? CAPTION_HEIGHT}
+                compact={isTileMode}
               />
             </div>
           );
@@ -677,6 +733,7 @@ export default function Gallery({
           onAddTo={(collectionId) => onAddToCollection?.(collectionId, contextMenu.assetIds || [contextMenu.item.asset_id])}
           onRemoveFrom={() => onRemoveFromCollection?.(activeCollectionId, contextMenu.assetIds || [contextMenu.item.asset_id])}
           onReveal={(path) => window.mediaWorkspace?.revealPath?.(path)}
+          onEdit={onEdit}
           onClose={closeContextMenu}
         />
       )}

@@ -76,6 +76,17 @@ export default function useWorkspace() {
     return nextItems;
   }, [items, query, sort]);
 
+  // Debounced server-side search: reload browser when query changes
+  const searchTimerRef = useRef(null);
+  useEffect(() => {
+    if (!browserReady) return;
+    clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      void loadBrowser({ search: query.trim() || undefined, force: true });
+    }, 250);
+    return () => clearTimeout(searchTimerRef.current);
+  }, [query]);
+
   const activeOverlay = useMemo(() => {
     const queuedRawCount = pendingImport.rawDirs.length;
     const queuedExportCount = pendingImport.exportDirs.length;
@@ -127,8 +138,8 @@ export default function useWorkspace() {
     setDetail(payload);
   }
 
-  async function loadBrowser({ nextStatus = status, append = false, collectionId = activeCollectionId } = {}) {
-    if (append ? browserLoadingMore || browserLoading || !browserHasMore : browserLoading) {
+  async function loadBrowser({ nextStatus = status, append = false, collectionId = activeCollectionId, search = query.trim() || undefined, force = false } = {}) {
+    if (!force && (append ? browserLoadingMore || browserLoading || !browserHasMore : browserLoading)) {
       return;
     }
     const requestId = browserRequestIdRef.current + 1;
@@ -151,6 +162,7 @@ export default function useWorkspace() {
           status: nextStatus,
           limit: PAGE_SIZE,
           offset: nextOffset,
+          search: search || undefined,
         });
       }
       if (browserRequestIdRef.current !== requestId) return;
@@ -179,7 +191,7 @@ export default function useWorkspace() {
   }
 
   async function loadMoreBrowser() {
-    await loadBrowser({ nextStatus: status, append: true });
+    await loadBrowser({ nextStatus: status, append: true, search: query.trim() || undefined });
   }
 
   async function loadCollections() {

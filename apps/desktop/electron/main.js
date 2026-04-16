@@ -3,6 +3,8 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
 const { spawn, spawnSync } = require("node:child_process");
+const os = require("node:os");
+const sharp = require("sharp");
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "media", privileges: { standard: false, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -161,6 +163,183 @@ function spawnDetachedSidecar(command) {
 function launchSidecarJob(command) {
   const child = spawnDetachedSidecar(command);
   child.unref();
+}
+
+function runPythonJson(script, args = []) {
+  const result = spawnSync("python3", ["-c", script, ...args], {
+    cwd: rootDir,
+    env: {
+      ...process.env,
+      PYTHONPATH: sidecarSrc,
+    },
+    encoding: "utf-8",
+  });
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || "python helper failed");
+  }
+
+  return result.stdout.trim() ? JSON.parse(result.stdout) : null;
+}
+
+function gcd(a, b) {
+  let x = Math.abs(Math.round(a));
+  let y = Math.abs(Math.round(b));
+  while (y) {
+    [x, y] = [y, x % y];
+  }
+  return x || 1;
+}
+
+function formatExifDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}:${pad(date.getMonth() + 1)}:${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function toExifRational(value, denominator = 1000) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const sign = numeric < 0 ? -1 : 1;
+  const scaled = Math.round(Math.abs(numeric) * denominator);
+  const divisor = gcd(scaled, denominator);
+  return `${sign * (scaled / divisor)}/${denominator / divisor}`;
+}
+
+function hasMetadataNumber(value) {
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+}
+
+function toExifGpsCoordinate(value) {
+  if (!hasMetadataNumber(value)) return null;
+  const numeric = Number(value);
+  const absolute = Math.abs(numeric);
+  const degrees = Math.floor(absolute);
+  const minutesFloat = (absolute - degrees) * 60;
+  const minutes = Math.floor(minutesFloat);
+  const seconds = (minutesFloat - minutes) * 60;
+  const secondsRational = toExifRational(seconds, 10000);
+  if (!secondsRational) return null;
+  return `${degrees}/1 ${minutes}/1 ${secondsRational}`;
+}
+
+function pruneEmptyExifDirectories(exif) {
+  return Object.fromEntries(
+    Object.entries(exif).filter(([, entries]) => entries && Object.keys(entries).length > 0),
+  );
+}
+
+function buildExifPayload(metadata) {
+  if (!metadata) return null;
+  const dateTime = formatExifDateTime(metadata.capture_time);
+  const exposureTime = metadata.shutter_speed ? toExifRational(metadata.shutter_speed, 1000000) : null;
+  const aperture = metadata.aperture ? toExifRational(metadata.aperture, 1000) : null;
+  const focalLength = metadata.focal_length ? toExifRational(metadata.focal_length, 1000) : null;
+  const latitude = toExifGpsCoordinate(metadata.gps_latitude);
+  const longitude = toExifGpsCoordinate(metadata.gps_longitude);
+
+  const exif = pruneEmptyExifDirectories({
+    IFD0: {
+      Orientation: "1",
+      ...(metadata.camera_make ? { Make: String(metadata.camera_make) } : {}),
+      ...(metadata.camera_model ? { Model: String(metadata.camera_model) } : {}),
+      ...(metadata.software ? { Software: String(metadata.software) } : {}),
+      ...(dateTime ? { DateTime: dateTime } : {}),
+    },
+    IFD2: {
+      ...(dateTime ? { DateTimeOriginal: dateTime } : {}),
+      ...(metadata.lens_model ? { LensModel: String(metadata.lens_model) } : {}),
+      ...(metadata.iso != null ? { ISOSpeedRatings: String(metadata.iso) } : {}),
+      ...(aperture ? { FNumber: aperture } : {}),
+      ...(exposureTime ? { ExposureTime: exposureTime } : {}),
+      ...(focalLength ? { FocalLength: focalLength } : {}),
+      ...(metadata.flash != null ? { Flash: String(metadata.flash) } : {}),
+      ...(metadata.white_balance != null ? { WhiteBalance: String(metadata.white_balance) } : {}),
+      ...(metadata.color_space != null ? { ColorSpace: String(metadata.color_space) } : {}),
+    },
+    IFD3: {
+      ...(latitude
+        ? {
+            GPSLatitudeRef: Number(metadata.gps_latitude) >= 0 ? "N" : "S",
+            GPSLatitude: latitude,
+          }
+        : {}),
+      ...(longitude
+        ? {
+            GPSLongitudeRef: Number(metadata.gps_longitude) >= 0 ? "E" : "W",
+            GPSLongitude: longitude,
+          }
+        : {}),
+    },
+  });
+
+  return Object.keys(exif).length ? exif : null;
+}
+
+function readSourceMetadataForExport(sourcePath) {
+  if (!sourcePath) return null;
+  const script = `
+import json
+import sys
+from pathlib import Path
+from media_workspace.metadata import extract_export_candidate
+
+meta = extract_export_candidate(Path(sys.argv[1]))
+print(json.dumps({
+    "capture_time": meta.capture_time,
+    "camera_make": meta.camera_make,
+    "camera_model": meta.camera_model,
+    "lens_model": meta.lens_model,
+    "software": meta.software,
+    "iso": meta.iso,
+    "aperture": meta.aperture,
+    "shutter_speed": meta.shutter_speed,
+    "focal_length": meta.focal_length,
+    "flash": meta.flash,
+    "white_balance": meta.white_balance,
+    "color_space": meta.color_space,
+    "gps_latitude": meta.gps_latitude,
+    "gps_longitude": meta.gps_longitude,
+}))
+`;
+  return runPythonJson(script, [sourcePath]);
+}
+
+async function writeImageWithSourceMetadata(targetPath, outputBuffer, sourceMetadataPath) {
+  const ext = path.extname(targetPath).toLowerCase();
+  let pipeline = sharp(outputBuffer, { limitInputPixels: false }).withMetadata({ orientation: 1 });
+
+  if (sourceMetadataPath) {
+    try {
+      const [structuredMetadata, sourceSharpMeta] = await Promise.all([
+        Promise.resolve(readSourceMetadataForExport(sourceMetadataPath)),
+        sharp(sourceMetadataPath, { limitInputPixels: false }).metadata(),
+      ]);
+      const exif = buildExifPayload(structuredMetadata);
+      if (exif) {
+        pipeline = pipeline.withExif(exif);
+      }
+      if (sourceSharpMeta.xmp) {
+        pipeline = pipeline.withXmp(sourceSharpMeta.xmp.toString("utf8"));
+      }
+    } catch (error) {
+      console.warn("[save-image] failed to preserve source metadata:", error);
+    }
+  }
+
+  if (ext === ".png") {
+    pipeline = pipeline.png();
+  } else if (ext === ".webp") {
+    pipeline = pipeline.webp();
+  } else {
+    pipeline = pipeline.jpeg();
+  }
+
+  await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+  await pipeline.toFile(targetPath);
+  return { path: targetPath };
 }
 
 function formatJobStatus(job) {
@@ -434,7 +613,7 @@ ipcMain.handle("workspace:pending", () => {
 });
 
 ipcMain.handle("workspace:browse", async (_event, options) => {
-  return await callSidecarJsonAsync([
+  const command = [
     "browse-exports",
     "--status",
     options.status,
@@ -442,7 +621,11 @@ ipcMain.handle("workspace:browse", async (_event, options) => {
     String(options.limit),
     "--offset",
     String(options.offset),
-  ]) || [];
+  ];
+  if (options.search) {
+    command.push("--search", options.search);
+  }
+  return await callSidecarJsonAsync(command) || [];
 });
 
 ipcMain.handle("workspace:detail", async (_event, exportPath) => {
@@ -455,6 +638,188 @@ ipcMain.handle("workspace:reveal", (_event, targetPath) => {
   }
   shell.showItemInFolder(targetPath);
   return true;
+});
+
+ipcMain.handle("workspace:pick-save-path", async (_event, options) => {
+  const result = await dialog.showSaveDialog({
+    title: "Save edited image",
+    defaultPath: options?.defaultPath || path.join(rootDir, "data", "edited-image.jpg"),
+    buttonLabel: "Save Image",
+    filters: Array.isArray(options?.filters) ? options.filters : undefined,
+  });
+  if (result.canceled || !result.filePath) {
+    return null;
+  }
+  return result.filePath;
+});
+
+ipcMain.handle("workspace:save-image", async (_event, targetPath, arrayBuffer, sourceMetadataPath) => {
+  if (!targetPath) {
+    throw new Error("Missing target path");
+  }
+  const output = Buffer.from(arrayBuffer);
+  return await writeImageWithSourceMetadata(targetPath, output, sourceMetadataPath);
+});
+
+ipcMain.handle("workspace:process-and-save", async (_event, options) => {
+  const {
+    sourcePath,
+    savePath,
+    quarterTurns = 0,
+    freeAngle = 0,
+    flipX = false,
+    flipY = false,
+    crop,
+    quality = 92,
+  } = options || {};
+
+  if (!sourcePath || !savePath) throw new Error("Missing source or save path");
+
+  const t0 = Date.now();
+  console.log("[process-and-save] source:", sourcePath);
+
+  // Read metadata (fast — no pixel decode)
+  const meta = await sharp(sourcePath, { limitInputPixels: false }).metadata();
+  const needsExifOrient = meta.orientation && meta.orientation !== 1;
+
+  // EXIF orientation decomposition: rotation angle + optional horizontal mirror (flop).
+  // Sharp pipeline order is: rotate → flop → flip, but EXIF semantics apply mirror BEFORE rotation.
+  // Flop then Rotate(θ) ≡ Rotate(−θ) then Flop, so we negate the EXIF angle when mirror is present.
+  const EXIF_MAP = {
+    1: { angle: 0, flop: false },
+    2: { angle: 0, flop: true },
+    3: { angle: 180, flop: false },
+    4: { angle: 180, flop: true },
+    5: { angle: 90, flop: true },   // want: flop→rotate(270) ≡ rotate(−270=90)→flop
+    6: { angle: 90, flop: false },
+    7: { angle: 270, flop: true },   // want: flop→rotate(90) ≡ rotate(−90=270)→flop
+    8: { angle: 270, flop: false },
+  };
+  const exif = EXIF_MAP[meta.orientation] || { angle: 0, flop: false };
+
+  // Oriented source dimensions (after EXIF would be applied)
+  const orientSwaps = [5, 6, 7, 8].includes(meta.orientation);
+  const srcW = orientSwaps ? meta.height : meta.width;
+  const srcH = orientSwaps ? meta.width : meta.height;
+
+  const discreteAngle = ((quarterTurns * 90) % 360 + 360) % 360;
+
+  // Decide: single-pipeline (fast) vs two-step with temp file (safe for edge cases)
+  // Single pipeline works when we can merge EXIF + user transforms into one .rotate() call.
+  // That's possible when there's no conflicting .rotate() — i.e. we combine all angles into one.
+  const useFastPath = true; // always use single pipeline with EXIF decomposition
+
+  let tmpPath = null;
+
+  try {
+    let pipeline;
+    let w, h;
+
+    if (useFastPath) {
+      // --- Fast path: single pipeline, no intermediate file ---
+      pipeline = sharp(sourcePath, { limitInputPixels: false, sequentialRead: true });
+
+      // Combine EXIF angle + discrete user rotation
+      const combinedDiscreteAngle = (exif.angle + discreteAngle) % 360;
+      // Combine EXIF flop with user flipX (both are horizontal mirrors → XOR)
+      const effectiveFlipX = exif.flop !== flipX;
+
+      // Single .rotate() with explicit angle disables EXIF auto-orient
+      const totalAngle = combinedDiscreteAngle + freeAngle;
+      if (totalAngle !== 0) {
+        if (freeAngle === 0) {
+          pipeline = pipeline.rotate(combinedDiscreteAngle);
+        } else {
+          pipeline = pipeline.rotate(totalAngle, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+        }
+      } else {
+        // totalAngle is 0 but we still need to suppress EXIF auto-orient
+        pipeline = pipeline.rotate(0);
+      }
+
+      if (effectiveFlipX) pipeline = pipeline.flop();
+      if (flipY) pipeline = pipeline.flip();
+
+      // Dimension tracking (post-orient, post-discrete-rotation)
+      w = srcW;
+      h = srcH;
+      if (discreteAngle === 90 || discreteAngle === 270) [w, h] = [h, w];
+
+    } else {
+      // --- Fallback: two-step via temp file (kept as safety net) ---
+      tmpPath = path.join(os.tmpdir(), `framebase-orient-${Date.now()}.tiff`);
+      const orientResult = await sharp(sourcePath, { limitInputPixels: false })
+        .rotate()
+        .tiff({ compression: "none" })
+        .toFile(tmpPath);
+
+      w = orientResult.width;
+      h = orientResult.height;
+
+      pipeline = sharp(tmpPath, { limitInputPixels: false });
+      if (flipX) pipeline = pipeline.flop();
+      if (flipY) pipeline = pipeline.flip();
+
+      const totalAngle = discreteAngle + freeAngle;
+      if (totalAngle !== 0) {
+        if (freeAngle === 0) {
+          pipeline = pipeline.rotate(discreteAngle);
+        } else {
+          pipeline = pipeline.rotate(totalAngle, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+        }
+      }
+
+      if (discreteAngle === 90 || discreteAngle === 270) [w, h] = [h, w];
+    }
+
+    // Free-angle dimension expansion
+    if (freeAngle !== 0) {
+      const rad = (freeAngle * Math.PI) / 180;
+      const c = Math.abs(Math.cos(rad));
+      const s = Math.abs(Math.sin(rad));
+      const newW = w * c + h * s;
+      const newH = w * s + h * c;
+      w = newW;
+      h = newH;
+    }
+
+    // Crop (normalized 0-1 → pixel coordinates)
+    if (crop) {
+      const left = Math.max(0, Math.round(crop.x * w));
+      const top = Math.max(0, Math.round(crop.y * h));
+      const cw = Math.min(Math.round(w) - left, Math.max(1, Math.round(crop.width * w)));
+      const ch = Math.min(Math.round(h) - top, Math.max(1, Math.round(crop.height * h)));
+      pipeline = pipeline.extract({ left, top, width: cw, height: ch });
+    }
+
+    // Preserve EXIF/IPTC/XMP metadata (orientation tag is already handled by explicit .rotate())
+    pipeline = pipeline.keepMetadata();
+
+    // Output format
+    const ext = path.extname(savePath).toLowerCase();
+    if (ext === ".png") {
+      pipeline = pipeline.png();
+    } else if (ext === ".webp") {
+      pipeline = pipeline.webp({ quality });
+    } else {
+      pipeline = pipeline.jpeg({ quality });
+    }
+
+    await fs.promises.mkdir(path.dirname(savePath), { recursive: true });
+    const result = await pipeline.toFile(savePath);
+
+    console.log(`[process-and-save] ${result.width}×${result.height} in ${Date.now() - t0}ms → ${savePath}`);
+    return { path: savePath, width: result.width, height: result.height };
+  } finally {
+    if (tmpPath) fs.promises.unlink(tmpPath).catch(() => {});
+  }
+});
+
+ipcMain.handle("workspace:quick-register", async (_event, exportPath, originPath) => {
+  if (!exportPath) return null;
+  const command = ["quick-register", "--export-path", exportPath];
+  if (originPath) command.push("--origin-path", originPath);
+  return await callSidecarJsonAsync(command);
 });
 
 ipcMain.handle("workspace:info", () => workspaceInfo());

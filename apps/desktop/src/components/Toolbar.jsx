@@ -6,6 +6,7 @@ import {
   RotateCw,
   Search,
   LayoutGrid,
+  Grid2x2,
   LayoutDashboard,
   Columns2,
   FolderPlus,
@@ -17,6 +18,7 @@ import {
 
 const DISPLAY_MODES = [
   { key: "grid", icon: LayoutGrid, tip: "Grid" },
+  { key: "tiles", icon: Grid2x2, tip: "Tiles" },
   { key: "justified", icon: LayoutDashboard, tip: "Justified" },
   { key: "waterfall", icon: Columns2, tip: "Waterfall" },
 ];

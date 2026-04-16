@@ -58,6 +58,13 @@ function formatGPS(lat, lon) {
 }
 
 export default function Inspector({ detail, onRatingChange }) {
+  const [localRating, setLocalRating] = useState(null);
+  const currentAssetId = detail?.asset_id || detail?.export_path || null;
+
+  useEffect(() => {
+    setLocalRating(null);
+  }, [currentAssetId]);
+
   if (!detail) {
     return (
       <aside className="flex h-full items-center justify-center overflow-y-auto bg-chrome px-4">
@@ -80,12 +87,6 @@ export default function Inspector({ detail, onRatingChange }) {
   const fileSize = formatBytes(exportMeta.file_size || exportMeta.size_bytes) || "Unknown";
 
   const metaRating = Number(detail.app_rating ?? rawMeta.rating ?? exportMeta.rating ?? 0);
-  const [localRating, setLocalRating] = useState(null);
-  const currentAssetId = detail.asset_id || detail.export_path;
-  useEffect(() => {
-    setLocalRating(null);
-  }, [currentAssetId]);
-
   const rating = localRating ?? metaRating;
   const gps = formatGPS(
     rawMeta.gps_latitude ?? exportMeta.gps_latitude,
