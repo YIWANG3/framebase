@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld("mediaWorkspace", {
   saveImage: (targetPath, arrayBuffer, sourceMetadataPath) => ipcRenderer.invoke("workspace:save-image", targetPath, arrayBuffer, sourceMetadataPath),
   processAndSave: (options) => ipcRenderer.invoke("workspace:process-and-save", options),
   quickRegister: (exportPath, originPath) => ipcRenderer.invoke("workspace:quick-register", exportPath, originPath),
+  deleteExportAssets: (assetIds) => ipcRenderer.invoke("workspace:delete-export-assets", assetIds),
   getAiProviderToken: (provider) => ipcRenderer.invoke("workspace:get-ai-provider-token", provider),
   setAiProviderToken: (provider, token) => ipcRenderer.invoke("workspace:set-ai-provider-token", provider, token),
   deleteAiProviderToken: (provider) => ipcRenderer.invoke("workspace:delete-ai-provider-token", provider),

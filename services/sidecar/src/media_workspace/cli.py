@@ -11,17 +11,22 @@ from .config import Thresholds
 from .analysis import analyze_metadata_coverage
 from .ai_repaint import DEFAULT_GEMINI_MODEL, run_mock_repaint, run_nanobanana_repaint
 from .db import (
+    attach_asset_to_resource_set,
     cleanup_orphan_export_assets,
     confirm_match,
     connect,
     create_job,
     delete_app_setting,
+    delete_export_asset_from_catalog,
+    find_export_asset_ids_by_stem,
     get_export_asset_detail,
     get_export_asset_detail_by_path,
     get_app_setting,
     get_job,
     get_latest_job,
     init_db,
+    list_singleton_primary_resource_sets,
+    list_export_assets_missing_resource_set,
     list_jobs,
     list_catalog_roots,
     list_export_assets,
@@ -34,7 +39,9 @@ from .db import (
     update_collection,
     delete_collection,
     add_collection_items,
+    attach_asset_to_resource_set,
     remove_collection_items,
+    reassign_asset_to_resource_set,
     browse_collection,
     set_asset_rating,
     set_app_setting,
@@ -54,6 +61,37 @@ from .watcher import ExportWatcher
 
 def _provider_token_key(provider: str) -> str:
     return f"ai_provider_token:{provider}"
+
+
+DERIVED_STEM_MARKERS = [
+    "_ai-repaint",
+    "_edited",
+    "_crop",
+]
+
+
+def _infer_origin_stem(stem: str) -> tuple[str | None, str]:
+    inferred_kind = "import"
+    current = stem
+    changed = False
+    while True:
+        next_value = current
+        if "_ai-repaint" in current:
+            next_value = current.split("_ai-repaint", 1)[0]
+            inferred_kind = "ai_repaint"
+        elif "_edited" in current:
+            next_value = current.split("_edited", 1)[0]
+            if inferred_kind == "import":
+                inferred_kind = "crop"
+        elif "_crop" in current:
+            next_value = current.split("_crop", 1)[0]
+            if inferred_kind == "import":
+                inferred_kind = "crop"
+        if next_value == current:
+            break
+        current = next_value
+        changed = True
+    return (current if changed and current else None, inferred_kind)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -189,6 +227,9 @@ def build_parser() -> argparse.ArgumentParser:
     quick_reg.add_argument("--export-path", type=Path, required=True)
     quick_reg.add_argument("--origin-path", type=Path, default=None)
 
+    delete_export = subparsers.add_parser("delete-export-assets", parents=[common])
+    delete_export.add_argument("--asset-id", action="append", required=True)
+
     subparsers.add_parser("cleanup-orphan-exports", parents=[common])
     subparsers.add_parser("catalog-roots", parents=[common])
     register_roots_parser = subparsers.add_parser("register-roots", parents=[common])
@@ -239,6 +280,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     delete_provider_token = subparsers.add_parser("delete-provider-token", parents=[common])
     delete_provider_token.add_argument("--provider", required=True)
+
+    subparsers.add_parser("repair-resource-sets", parents=[common])
 
     run_ai_repaint_job_parser = subparsers.add_parser("run-ai-repaint-job", parents=[common])
     run_ai_repaint_job_parser.add_argument("--job-id", required=True)
@@ -314,6 +357,75 @@ def main() -> int:
     if args.command == "delete-provider-token":
         delete_app_setting(connection, _provider_token_key(args.provider))
         print(json.dumps({"provider": args.provider, "configured": False}, indent=2))
+        return 0
+
+    if args.command == "repair-resource-sets":
+        repaired = 0
+        primaries_created = 0
+        versions_attached = 0
+        missing = list_export_assets_missing_resource_set(connection)
+        for row in missing:
+            asset_id = str(row["asset_id"])
+            stem = str(row["stem"])
+            raw_asset_id = str(row["raw_asset_id"]) if row["raw_asset_id"] else None
+            origin_stem, version_kind = _infer_origin_stem(stem)
+            origin_asset_id = None
+            if origin_stem:
+                candidate_ids = [candidate for candidate in find_export_asset_ids_by_stem(connection, origin_stem) if candidate != asset_id]
+                if candidate_ids:
+                    origin_asset_id = candidate_ids[0]
+            if origin_asset_id:
+                attach_asset_to_resource_set(
+                    connection,
+                    asset_id,
+                    origin_asset_id=origin_asset_id,
+                    raw_asset_id=raw_asset_id,
+                    version_kind=version_kind,
+                    commit=False,
+                )
+                versions_attached += 1
+            else:
+                attach_asset_to_resource_set(
+                    connection,
+                    asset_id,
+                    origin_asset_id=None,
+                    raw_asset_id=raw_asset_id,
+                    version_kind="import",
+                    commit=False,
+                )
+                primaries_created += 1
+            repaired += 1
+
+        repaired_singletons = 0
+        suspect_sets = list_singleton_primary_resource_sets(connection)
+        for row in suspect_sets:
+            stem = str(row["stem"])
+            origin_stem, version_kind = _infer_origin_stem(stem)
+            if not origin_stem:
+                continue
+            candidate_ids = [candidate for candidate in find_export_asset_ids_by_stem(connection, origin_stem) if candidate != row["primary_asset_id"]]
+            if not candidate_ids:
+                continue
+            origin_asset_id = candidate_ids[0]
+            reassign_asset_to_resource_set(
+                connection,
+                str(row["primary_asset_id"]),
+                origin_asset_id=origin_asset_id,
+                raw_asset_id=None,
+                version_kind=version_kind,
+                commit=False,
+            )
+            repaired_singletons += 1
+            versions_attached += 1
+            repaired += 1
+        connection.commit()
+        print(json.dumps({
+            "ok": True,
+            "repaired": repaired,
+            "primaries_created": primaries_created,
+            "versions_attached": versions_attached,
+            "singleton_versions_reassigned": repaired_singletons,
+        }, indent=2))
         return 0
 
     if args.command == "run-ai-repaint-job":
@@ -520,6 +632,14 @@ def main() -> int:
                     "raw_path": row["raw_path"],
                     "raw_metadata": json.loads(row["raw_metadata_json"] or "{}") if row["raw_metadata_json"] else {},
                     "preview_path": preview_path,
+                    "resource_set_id": row["resource_set_id"],
+                    "resource_role": row["resource_role"],
+                    "version_kind": row["version_kind"],
+                    "resource_sort_order": row["resource_sort_order"],
+                    "set_primary_asset_id": row["set_primary_asset_id"],
+                    "set_raw_asset_id": row["set_raw_asset_id"],
+                    "primary_stem": row["primary_stem"],
+                    "set_item_count": row["set_item_count"],
                 }
             )
         print(json.dumps(payload, indent=2))
@@ -554,6 +674,14 @@ def main() -> int:
             "raw_preview_path": str((catalog.root / row["raw_preview_relative_path"]).resolve())
             if row["raw_preview_relative_path"]
             else None,
+            "resource_set_id": row["resource_set_id"],
+            "resource_role": row["resource_role"],
+            "version_kind": row["version_kind"],
+            "resource_sort_order": row["resource_sort_order"],
+            "set_primary_asset_id": row["set_primary_asset_id"],
+            "set_raw_asset_id": row["set_raw_asset_id"],
+            "primary_stem": row["primary_stem"],
+            "set_item_count": row["set_item_count"],
         }
         print(json.dumps(payload, indent=2))
         return 0
@@ -581,6 +709,7 @@ def main() -> int:
         export_path = args.export_path.resolve()
         candidate = extract_export_candidate(export_path, fingerprint_mode="head-only")
         asset_id = upsert_export_asset(connection, candidate, commit=True)
+        origin_asset_id = None
 
         # If origin-path provided, copy its source relationship instead of running matcher
         match_status = "unmatched"
@@ -588,6 +717,11 @@ def main() -> int:
         raw_asset_id = None
         if args.origin_path:
             origin = str(args.origin_path.resolve())
+            origin_asset_row = connection.execute(
+                "SELECT asset_id FROM asset_files WHERE path = ?",
+                (origin,),
+            ).fetchone()
+            origin_asset_id = str(origin_asset_row["asset_id"]) if origin_asset_row else None
             origin_row = connection.execute(
                 """
                 SELECT registry.raw_asset_id, registry.score
@@ -622,6 +756,15 @@ def main() -> int:
             )
             upsert_registry(connection, reg_decision, commit=True)
 
+        attach_asset_to_resource_set(
+            connection,
+            asset_id,
+            origin_asset_id=origin_asset_id,
+            raw_asset_id=raw_asset_id,
+            version_kind="derived",
+            commit=True,
+        )
+
         # Generate preview for this single asset
         preview_service = PreviewService(catalog)
         row = connection.execute(
@@ -654,6 +797,15 @@ def main() -> int:
 
     if args.command == "cleanup-orphan-exports":
         payload = cleanup_orphan_export_assets(connection)
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "delete-export-assets":
+        payload = [
+            delete_export_asset_from_catalog(connection, catalog.root, asset_id, commit=False)
+            for asset_id in args.asset_id
+        ]
+        connection.commit()
         print(json.dumps(payload, indent=2))
         return 0
 
@@ -769,6 +921,14 @@ def main() -> int:
                     "raw_path": row["raw_path"],
                     "raw_metadata": json.loads(row["raw_metadata_json"] or "{}") if row["raw_metadata_json"] else {},
                     "preview_path": preview_path,
+                    "resource_set_id": row["resource_set_id"],
+                    "resource_role": row["resource_role"],
+                    "version_kind": row["version_kind"],
+                    "resource_sort_order": row["resource_sort_order"],
+                    "set_primary_asset_id": row["set_primary_asset_id"],
+                    "set_raw_asset_id": row["set_raw_asset_id"],
+                    "primary_stem": row["primary_stem"],
+                    "set_item_count": row["set_item_count"],
                 }
             )
         print(json.dumps(payload, indent=2))

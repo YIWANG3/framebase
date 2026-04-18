@@ -136,6 +136,32 @@ SCHEMA_STATEMENTS = [
         FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS resource_sets (
+        set_id TEXT PRIMARY KEY,
+        primary_asset_id TEXT NOT NULL,
+        raw_asset_id TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(primary_asset_id) REFERENCES assets(asset_id),
+        FOREIGN KEY(raw_asset_id) REFERENCES assets(asset_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS resource_set_items (
+        set_id TEXT NOT NULL,
+        asset_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('primary', 'raw', 'version')),
+        version_kind TEXT,
+        parent_asset_id TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (set_id, asset_id),
+        FOREIGN KEY(set_id) REFERENCES resource_sets(set_id) ON DELETE CASCADE,
+        FOREIGN KEY(asset_id) REFERENCES assets(asset_id),
+        FOREIGN KEY(parent_asset_id) REFERENCES assets(asset_id)
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_roots_type ON catalog_roots(root_type)",
     "CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(asset_type)",
     "CREATE INDEX IF NOT EXISTS idx_assets_stem_key ON assets(stem_key)",
@@ -145,6 +171,9 @@ SCHEMA_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_raw_cache_stem_key ON raw_metadata_cache(stem_key)",
     "CREATE INDEX IF NOT EXISTS idx_raw_cache_capture_time ON raw_metadata_cache(capture_time)",
     "CREATE INDEX IF NOT EXISTS idx_registry_status ON export_lookup_registry(match_status)",
+    "CREATE INDEX IF NOT EXISTS idx_resource_sets_primary ON resource_sets(primary_asset_id)",
+    "CREATE INDEX IF NOT EXISTS idx_resource_set_items_asset ON resource_set_items(asset_id)",
+    "CREATE INDEX IF NOT EXISTS idx_resource_set_items_parent ON resource_set_items(parent_asset_id)",
     """
     CREATE TABLE IF NOT EXISTS collections (
         collection_id TEXT PRIMARY KEY,

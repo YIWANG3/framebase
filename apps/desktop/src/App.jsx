@@ -16,6 +16,7 @@ export default function App() {
   const [showSidebar] = useState(true);
   const [showInspector] = useState(true);
   const [displayMode, setDisplayMode] = useState("grid");
+  const [versionMode, setVersionMode] = useState("primary");
   const [thumbSize, setThumbSize] = useState(180);
   const [history, setHistory] = useState(["all"]);
   const [historyIndex, setHistoryIndex] = useState(0);
@@ -27,7 +28,13 @@ export default function App() {
   const [selectionAnchorPath, setSelectionAnchorPath] = useState(null);
   const resizeSidebar = usePaneResize(workspace.setSidebarWidth, 200, 360);
   const resizeInspector = usePaneResize((value) => workspace.setInspectorWidth(-value), -420, -240);
-  const currentItems = workspace.filteredItems;
+  const currentItems = useMemo(
+    () =>
+      versionMode === "all_versions"
+        ? workspace.filteredItems
+        : workspace.filteredItems.filter((item) => item.resource_role === "primary" || !item.resource_set_id),
+    [workspace.filteredItems, versionMode],
+  );
   const orderedPaths = useMemo(() => currentItems.map((item) => item.export_path), [currentItems]);
   const itemByExportPath = useMemo(
     () => new Map(currentItems.map((item) => [item.export_path, item])),
@@ -437,12 +444,14 @@ export default function App() {
             canGoForward={historyIndex < history.length - 1}
             displayMode={displayMode}
             setDisplayMode={setDisplayMode}
+            versionMode={versionMode}
+            setVersionMode={setVersionMode}
             thumbSize={thumbSize}
             setThumbSize={setThumbSize}
           />
           <div className="min-h-0 flex-1 overflow-hidden">
               <Gallery
-                items={workspace.filteredItems}
+                items={currentItems}
                 selectedExportPath={workspace.selectedExportPath}
                 selectedExportPaths={selectedExportPaths}
                 onSelect={handleItemSelect}
@@ -465,7 +474,9 @@ export default function App() {
                 selectedAssetIds={selectedAssetIds}
                 onAddToCollection={workspace.addToCollection}
                 onRemoveFromCollection={workspace.removeFromCollection}
+                onDeleteFromCatalog={workspace.deleteExportAssets}
                 onEdit={openEditor}
+                versionMode={versionMode}
               />
           </div>
         </section>
@@ -495,6 +506,7 @@ export default function App() {
       <Lightbox
         open={lightboxOpen}
         items={currentItems}
+        allItems={workspace.filteredItems}
         currentIndex={Math.max(selectedIndex, 0)}
         proofMode={proofMode}
         onToggleProof={() => setProofMode((current) => !current)}

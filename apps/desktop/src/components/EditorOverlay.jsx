@@ -1349,17 +1349,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
   return (
     <div className="fixed inset-0 z-[10100] flex flex-col bg-app text-text">
       <div className="relative flex h-11 shrink-0 items-center justify-center border-b border-border/60 bg-chrome px-4">
-        <div className="absolute left-3 flex items-center gap-0.5">
-          <button
-            type="button"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted2 transition-colors hover:bg-hover hover:text-text"
-            onClick={onClose}
-            title="Close editor (Esc)"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex items-center gap-2 text-[12px]">
+        <div className="absolute left-3 flex items-center gap-2 text-[12px]">
           <span className="max-w-[40vw] truncate text-muted2">{sourceLabel}</span>
           {!stateEquals(editorState, baseSnapshotRef.current || BASE_STATE) ? (
             <span className="text-[11px] text-muted2/60">Edited</span>
@@ -1375,6 +1365,14 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
           >
             <Download className="h-3.5 w-3.5" />
             Save
+          </button>
+          <button
+            type="button"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted2 transition-colors hover:bg-hover hover:text-text"
+            onClick={onClose}
+            title="Close editor (Esc)"
+          >
+            <X className="h-4 w-4" />
           </button>
         </div>
       </div>

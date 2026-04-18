@@ -62,17 +62,52 @@ export default function useWorkspace() {
   }, [inspectorWidth]);
 
   const filteredItems = useMemo(() => {
+    const roleRank = (item) => {
+      if (!item?.resource_set_id) return 0;
+      if (item.resource_role === "raw") return 0;
+      if (item.resource_role === "primary") return 1;
+      return 2;
+    };
+    const compareWithinSet = (left, right) =>
+      roleRank(left) - roleRank(right) ||
+      Number(left?.resource_sort_order ?? 0) - Number(right?.resource_sort_order ?? 0) ||
+      left.stem.localeCompare(right.stem);
     let nextItems = [...items];
     const normalizedQuery = query.trim().toLowerCase();
     if (normalizedQuery) {
       nextItems = nextItems.filter((item) =>
-        [item.stem, item.export_path, item.raw_path, item.export_metadata?.camera_model, item.raw_metadata?.camera_model]
+        [
+          item.stem,
+          item.primary_stem,
+          item.export_path,
+          item.raw_path,
+          item.version_kind,
+          item.export_metadata?.camera_model,
+          item.raw_metadata?.camera_model,
+        ]
           .some((field) => String(field ?? "").toLowerCase().includes(normalizedQuery)),
       );
     }
-    if (sort === "name-desc") nextItems.sort((a, b) => b.stem.localeCompare(a.stem));
-    else if (sort === "score-desc") nextItems.sort((a, b) => Number(b.score ?? 0) - Number(a.score ?? 0));
-    else nextItems.sort((a, b) => a.stem.localeCompare(b.stem));
+    if (sort === "name-desc") {
+      nextItems.sort((a, b) => {
+        const leftName = a.primary_stem || a.stem;
+        const rightName = b.primary_stem || b.stem;
+        return rightName.localeCompare(leftName) || compareWithinSet(a, b);
+      });
+    } else if (sort === "score-desc") {
+      nextItems.sort((a, b) => {
+        const scoreDelta = Number(b.score ?? 0) - Number(a.score ?? 0);
+        const leftName = a.primary_stem || a.stem;
+        const rightName = b.primary_stem || b.stem;
+        return scoreDelta || leftName.localeCompare(rightName) || compareWithinSet(a, b);
+      });
+    } else {
+      nextItems.sort((a, b) => {
+        const leftName = a.primary_stem || a.stem;
+        const rightName = b.primary_stem || b.stem;
+        return leftName.localeCompare(rightName) || compareWithinSet(a, b);
+      });
+    }
     return nextItems;
   }, [items, query, sort]);
 
@@ -236,6 +271,17 @@ export default function useWorkspace() {
     if (activeCollectionId === collectionId) {
       await loadBrowser({ collectionId });
     }
+  }
+
+  async function deleteExportAssets(assetIds) {
+    const targetIds = [...new Set((assetIds || []).filter(Boolean))];
+    if (!targetIds.length) return;
+    await window.mediaWorkspace.deleteExportAssets(targetIds);
+    if (selectedExportPath && items.some((item) => targetIds.includes(item.asset_id) && item.export_path === selectedExportPath)) {
+      setSelectedExportPath(null);
+      setDetail(null);
+    }
+    await refreshAll({ nextStatus: status, collectionId: activeCollectionId });
   }
 
   async function setAssetRating(assetIds, rating) {
@@ -554,6 +600,7 @@ export default function useWorkspace() {
     deleteCollection,
     addToCollection,
     removeFromCollection,
+    deleteExportAssets,
     setAssetRating,
   };
 }

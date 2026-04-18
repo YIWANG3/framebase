@@ -6,6 +6,7 @@ from .ai_repaint import DEFAULT_GEMINI_MODEL, run_mock_repaint, run_nanobanana_r
 from .catalog import ensure_catalog
 from .config import Thresholds
 from .db import (
+    attach_asset_to_resource_set,
     get_app_setting,
     update_job,
     upsert_export_asset,
@@ -455,6 +456,13 @@ def run_ai_repaint_job(
 
         candidate = extract_export_candidate(Path(result.output_path), fingerprint_mode="head-only")
         asset_id = upsert_export_asset(connection, candidate, commit=True)
+        origin_asset_id = None
+        if origin_path:
+            origin_row = connection.execute(
+                "SELECT asset_id FROM asset_files WHERE path = ?",
+                (str(origin_path.resolve()),),
+            ).fetchone()
+            origin_asset_id = str(origin_row["asset_id"]) if origin_row else None
 
         match_status = "unmatched"
         match_score = 0.0
@@ -491,6 +499,15 @@ def run_ai_repaint_job(
                 feature_vector={},
             )
             upsert_registry(connection, reg_decision, commit=True)
+
+        attach_asset_to_resource_set(
+            connection,
+            asset_id,
+            origin_asset_id=origin_asset_id,
+            raw_asset_id=raw_asset_id,
+            version_kind="ai_repaint",
+            commit=True,
+        )
 
         preview_service = PreviewService(ensure_catalog(catalog_path))
         row = connection.execute(

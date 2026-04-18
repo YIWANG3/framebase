@@ -11,7 +11,7 @@ from .models import ExportCandidate, MatchDecision, RawMetadata
 from .schema import SCHEMA_STATEMENTS
 
 RESOLVER_VERSION = "reverse_lookup_v3_embedded_metadata"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -110,6 +110,265 @@ def _file_id(asset_id: str, path: str) -> str:
 def _link_id(parent_asset_id: str, child_asset_id: str, relation_type: str) -> str:
     digest = sha1(f"{parent_asset_id}:{child_asset_id}:{relation_type}".encode("utf-8")).hexdigest()[:20]
     return f"link_{digest}"
+
+
+def _resource_set_id() -> str:
+    return f"set_{uuid4().hex[:20]}"
+
+
+def get_resource_set(connection: sqlite3.Connection, set_id: str) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT set_id, primary_asset_id, raw_asset_id, created_at, updated_at
+        FROM resource_sets
+        WHERE set_id = ?
+        """,
+        (set_id,),
+    ).fetchone()
+
+
+def get_resource_set_for_asset(connection: sqlite3.Connection, asset_id: str) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT rs.set_id, rs.primary_asset_id, rs.raw_asset_id, rsi.role, rsi.version_kind, rsi.parent_asset_id, rsi.sort_order
+        FROM resource_set_items AS rsi
+        JOIN resource_sets AS rs ON rs.set_id = rsi.set_id
+        WHERE rsi.asset_id = ?
+        """,
+        (asset_id,),
+    ).fetchone()
+
+
+def _next_resource_sort_order(connection: sqlite3.Connection, set_id: str) -> int:
+    row = connection.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort_order FROM resource_set_items WHERE set_id = ?",
+        (set_id,),
+    ).fetchone()
+    return int(row["next_sort_order"]) if row is not None else 0
+
+
+def add_asset_to_resource_set(
+    connection: sqlite3.Connection,
+    set_id: str,
+    asset_id: str,
+    *,
+    role: str,
+    version_kind: str | None = None,
+    parent_asset_id: str | None = None,
+    sort_order: int | None = None,
+    commit: bool = True,
+) -> None:
+    if sort_order is None:
+        sort_order = _next_resource_sort_order(connection, set_id)
+    connection.execute(
+        """
+        INSERT INTO resource_set_items (set_id, asset_id, role, version_kind, parent_asset_id, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(set_id, asset_id) DO UPDATE SET
+            role = excluded.role,
+            version_kind = excluded.version_kind,
+            parent_asset_id = excluded.parent_asset_id,
+            sort_order = excluded.sort_order
+        """,
+        (set_id, asset_id, role, version_kind, parent_asset_id, sort_order),
+    )
+    if commit:
+        connection.commit()
+
+
+def create_resource_set(
+    connection: sqlite3.Connection,
+    primary_asset_id: str,
+    *,
+    raw_asset_id: str | None = None,
+    commit: bool = True,
+) -> str:
+    existing = get_resource_set_for_asset(connection, primary_asset_id)
+    if existing:
+        if raw_asset_id and not existing["raw_asset_id"]:
+            connection.execute(
+                "UPDATE resource_sets SET raw_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE set_id = ?",
+                (raw_asset_id, existing["set_id"]),
+            )
+            add_asset_to_resource_set(
+                connection,
+                existing["set_id"],
+                raw_asset_id,
+                role="raw",
+                version_kind="raw",
+                parent_asset_id=None,
+                sort_order=0,
+                commit=False,
+            )
+            if commit:
+                connection.commit()
+        return str(existing["set_id"])
+
+    set_id = _resource_set_id()
+    connection.execute(
+        """
+        INSERT INTO resource_sets (set_id, primary_asset_id, raw_asset_id)
+        VALUES (?, ?, ?)
+        """,
+        (set_id, primary_asset_id, raw_asset_id),
+    )
+    add_asset_to_resource_set(connection, set_id, primary_asset_id, role="primary", version_kind="main", parent_asset_id=None, sort_order=1, commit=False)
+    if raw_asset_id and raw_asset_id != primary_asset_id:
+        add_asset_to_resource_set(connection, set_id, raw_asset_id, role="raw", version_kind="raw", parent_asset_id=None, sort_order=0, commit=False)
+    if commit:
+        connection.commit()
+    return set_id
+
+
+def attach_asset_to_resource_set(
+    connection: sqlite3.Connection,
+    asset_id: str,
+    *,
+    origin_asset_id: str | None = None,
+    raw_asset_id: str | None = None,
+    version_kind: str = "version",
+    commit: bool = True,
+) -> str:
+    existing = get_resource_set_for_asset(connection, asset_id)
+    if existing:
+        return str(existing["set_id"])
+
+    target_set = None
+    if origin_asset_id:
+        origin_set = get_resource_set_for_asset(connection, origin_asset_id)
+        if origin_set:
+            target_set = str(origin_set["set_id"])
+    if target_set is None and raw_asset_id:
+        raw_set = get_resource_set_for_asset(connection, raw_asset_id)
+        if raw_set:
+            target_set = str(raw_set["set_id"])
+
+    if target_set is None and origin_asset_id:
+        target_set = create_resource_set(
+            connection,
+            origin_asset_id,
+            raw_asset_id=raw_asset_id,
+            commit=False,
+        )
+
+    if target_set is None:
+        target_set = create_resource_set(connection, asset_id, raw_asset_id=raw_asset_id, commit=False)
+        if commit:
+            connection.commit()
+        return target_set
+
+    if raw_asset_id:
+        set_row = get_resource_set(connection, target_set)
+        if set_row is not None and not set_row["raw_asset_id"]:
+            connection.execute(
+                "UPDATE resource_sets SET raw_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE set_id = ?",
+                (raw_asset_id, target_set),
+            )
+            add_asset_to_resource_set(connection, target_set, raw_asset_id, role="raw", version_kind="raw", parent_asset_id=None, sort_order=0, commit=False)
+
+    add_asset_to_resource_set(
+        connection,
+        target_set,
+        asset_id,
+        role="version",
+        version_kind=version_kind,
+        parent_asset_id=origin_asset_id,
+        commit=False,
+    )
+    if commit:
+        connection.commit()
+    return target_set
+
+
+def list_export_assets_missing_resource_set(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    return connection.execute(
+        """
+        SELECT
+            assets.asset_id,
+            assets.stem,
+            assets.canonical_path,
+            registry.raw_asset_id
+        FROM assets
+        LEFT JOIN resource_set_items AS rsi
+            ON rsi.asset_id = assets.asset_id
+        LEFT JOIN export_lookup_registry AS registry
+            ON registry.export_asset_id = assets.asset_id
+        WHERE assets.asset_type = 'export'
+          AND rsi.set_id IS NULL
+        ORDER BY assets.created_at, assets.canonical_path
+        """
+    ).fetchall()
+
+
+def find_export_asset_ids_by_stem(connection: sqlite3.Connection, stem: str) -> list[str]:
+    rows = connection.execute(
+        """
+        SELECT asset_id
+        FROM assets
+        WHERE asset_type = 'export'
+          AND stem = ?
+        ORDER BY created_at, canonical_path
+        """,
+        (stem,),
+    ).fetchall()
+    return [str(row["asset_id"]) for row in rows]
+
+
+def list_singleton_primary_resource_sets(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    return connection.execute(
+        """
+        SELECT
+            rs.set_id,
+            rs.primary_asset_id,
+            a.stem,
+            a.canonical_path
+        FROM resource_sets AS rs
+        JOIN assets AS a
+            ON a.asset_id = rs.primary_asset_id
+        JOIN (
+            SELECT set_id, COUNT(*) AS item_count
+            FROM resource_set_items
+            GROUP BY set_id
+        ) AS counts
+            ON counts.set_id = rs.set_id
+        WHERE counts.item_count = 1
+        """
+    ).fetchall()
+
+
+def reassign_asset_to_resource_set(
+    connection: sqlite3.Connection,
+    asset_id: str,
+    *,
+    origin_asset_id: str,
+    raw_asset_id: str | None = None,
+    version_kind: str = "derived",
+    commit: bool = True,
+) -> str:
+    current = get_resource_set_for_asset(connection, asset_id)
+    if current:
+        connection.execute(
+            "DELETE FROM resource_set_items WHERE set_id = ? AND asset_id = ?",
+            (current["set_id"], asset_id),
+        )
+        remaining = connection.execute(
+            "SELECT COUNT(*) AS item_count FROM resource_set_items WHERE set_id = ?",
+            (current["set_id"],),
+        ).fetchone()
+        if remaining is not None and int(remaining["item_count"]) == 0:
+            connection.execute("DELETE FROM resource_sets WHERE set_id = ?", (current["set_id"],))
+
+    target_set = attach_asset_to_resource_set(
+        connection,
+        asset_id,
+        origin_asset_id=origin_asset_id,
+        raw_asset_id=raw_asset_id,
+        version_kind=version_kind,
+        commit=False,
+    )
+    if commit:
+        connection.commit()
+    return target_set
 
 
 def upsert_catalog_root(connection: sqlite3.Connection, root_type: str, path: Path, commit: bool = True) -> None:
@@ -521,6 +780,21 @@ def upsert_registry(connection: sqlite3.Connection, decision: MatchDecision, com
             confidence=decision.score,
             confirmed_by="system" if decision.status == "auto_bound" else "user",
         )
+        attach_asset_to_resource_set(
+            connection,
+            decision.export_asset_id,
+            raw_asset_id=decision.raw_asset_id,
+            version_kind="import",
+            commit=False,
+        )
+    else:
+        attach_asset_to_resource_set(
+            connection,
+            decision.export_asset_id,
+            raw_asset_id=None,
+            version_kind="import",
+            commit=False,
+        )
     if commit:
         connection.commit()
 
@@ -842,12 +1116,32 @@ def list_export_assets(
             registry.raw_asset_id,
             raw_assets.canonical_path AS raw_path,
             raw_assets.metadata_json AS raw_metadata_json,
-            preview_entries.relative_path AS preview_relative_path
+            preview_entries.relative_path AS preview_relative_path,
+            rsi.set_id AS resource_set_id,
+            rsi.role AS resource_role,
+            rsi.version_kind AS version_kind,
+            rsi.sort_order AS resource_sort_order,
+            rs.primary_asset_id AS set_primary_asset_id,
+            rs.raw_asset_id AS set_raw_asset_id,
+            primary_assets.stem AS primary_stem,
+            set_counts.set_item_count AS set_item_count
         FROM assets
         JOIN export_lookup_registry AS registry
             ON registry.export_asset_id = assets.asset_id
         LEFT JOIN assets AS raw_assets
             ON raw_assets.asset_id = registry.raw_asset_id
+        LEFT JOIN resource_set_items AS rsi
+            ON rsi.asset_id = assets.asset_id
+        LEFT JOIN resource_sets AS rs
+            ON rs.set_id = rsi.set_id
+        LEFT JOIN assets AS primary_assets
+            ON primary_assets.asset_id = rs.primary_asset_id
+        LEFT JOIN (
+            SELECT set_id, COUNT(*) AS set_item_count
+            FROM resource_set_items
+            GROUP BY set_id
+        ) AS set_counts
+            ON set_counts.set_id = rs.set_id
         LEFT JOIN preview_entries
             ON preview_entries.asset_id = assets.asset_id
            AND preview_entries.kind = 'preview'
@@ -880,7 +1174,15 @@ def get_export_asset_detail(connection: sqlite3.Connection, asset_id: str) -> sq
             raw_assets.canonical_path AS raw_path,
             raw_assets.metadata_json AS raw_metadata_json,
             export_preview.relative_path AS export_preview_relative_path,
-            raw_preview.relative_path AS raw_preview_relative_path
+            raw_preview.relative_path AS raw_preview_relative_path,
+            rsi.set_id AS resource_set_id,
+            rsi.role AS resource_role,
+            rsi.version_kind AS version_kind,
+            rsi.sort_order AS resource_sort_order,
+            rs.primary_asset_id AS set_primary_asset_id,
+            rs.raw_asset_id AS set_raw_asset_id,
+            primary_assets.stem AS primary_stem,
+            set_counts.set_item_count AS set_item_count
         FROM assets
         LEFT JOIN export_lookup_registry AS registry
             ON registry.rowid = (
@@ -892,6 +1194,18 @@ def get_export_asset_detail(connection: sqlite3.Connection, asset_id: str) -> sq
             )
         LEFT JOIN assets AS raw_assets
             ON raw_assets.asset_id = registry.raw_asset_id
+        LEFT JOIN resource_set_items AS rsi
+            ON rsi.asset_id = assets.asset_id
+        LEFT JOIN resource_sets AS rs
+            ON rs.set_id = rsi.set_id
+        LEFT JOIN assets AS primary_assets
+            ON primary_assets.asset_id = rs.primary_asset_id
+        LEFT JOIN (
+            SELECT set_id, COUNT(*) AS set_item_count
+            FROM resource_set_items
+            GROUP BY set_id
+        ) AS set_counts
+            ON set_counts.set_id = rs.set_id
         LEFT JOIN preview_entries AS export_preview
             ON export_preview.asset_id = assets.asset_id
            AND export_preview.kind = 'preview'
@@ -925,13 +1239,33 @@ def get_export_asset_detail_by_path(connection: sqlite3.Connection, export_path:
             raw_assets.canonical_path AS raw_path,
             raw_assets.metadata_json AS raw_metadata_json,
             export_preview.relative_path AS export_preview_relative_path,
-            raw_preview.relative_path AS raw_preview_relative_path
+            raw_preview.relative_path AS raw_preview_relative_path,
+            rsi.set_id AS resource_set_id,
+            rsi.role AS resource_role,
+            rsi.version_kind AS version_kind,
+            rsi.sort_order AS resource_sort_order,
+            rs.primary_asset_id AS set_primary_asset_id,
+            rs.raw_asset_id AS set_raw_asset_id,
+            primary_assets.stem AS primary_stem,
+            set_counts.set_item_count AS set_item_count
         FROM export_lookup_registry AS registry
         JOIN assets
             ON assets.asset_id = registry.export_asset_id
            AND assets.asset_type = 'export'
         LEFT JOIN assets AS raw_assets
             ON raw_assets.asset_id = registry.raw_asset_id
+        LEFT JOIN resource_set_items AS rsi
+            ON rsi.asset_id = assets.asset_id
+        LEFT JOIN resource_sets AS rs
+            ON rs.set_id = rsi.set_id
+        LEFT JOIN assets AS primary_assets
+            ON primary_assets.asset_id = rs.primary_asset_id
+        LEFT JOIN (
+            SELECT set_id, COUNT(*) AS set_item_count
+            FROM resource_set_items
+            GROUP BY set_id
+        ) AS set_counts
+            ON set_counts.set_id = rs.set_id
         LEFT JOIN preview_entries AS export_preview
             ON export_preview.asset_id = assets.asset_id
            AND export_preview.kind = 'preview'
@@ -1278,13 +1612,33 @@ def browse_collection(
             registry.raw_asset_id,
             raw_assets.canonical_path AS raw_path,
             raw_assets.metadata_json AS raw_metadata_json,
-            preview_entries.relative_path AS preview_relative_path
+            preview_entries.relative_path AS preview_relative_path,
+            rsi.set_id AS resource_set_id,
+            rsi.role AS resource_role,
+            rsi.version_kind AS version_kind,
+            rsi.sort_order AS resource_sort_order,
+            rs.primary_asset_id AS set_primary_asset_id,
+            rs.raw_asset_id AS set_raw_asset_id,
+            primary_assets.stem AS primary_stem,
+            set_counts.set_item_count AS set_item_count
         FROM collection_items ci
         JOIN assets ON assets.asset_id = ci.asset_id
         JOIN export_lookup_registry AS registry
             ON registry.export_asset_id = assets.asset_id
         LEFT JOIN assets AS raw_assets
             ON raw_assets.asset_id = registry.raw_asset_id
+        LEFT JOIN resource_set_items AS rsi
+            ON rsi.asset_id = assets.asset_id
+        LEFT JOIN resource_sets AS rs
+            ON rs.set_id = rsi.set_id
+        LEFT JOIN assets AS primary_assets
+            ON primary_assets.asset_id = rs.primary_asset_id
+        LEFT JOIN (
+            SELECT set_id, COUNT(*) AS set_item_count
+            FROM resource_set_items
+            GROUP BY set_id
+        ) AS set_counts
+            ON set_counts.set_id = rs.set_id
         LEFT JOIN preview_entries
             ON preview_entries.asset_id = assets.asset_id
            AND preview_entries.kind = 'preview'
@@ -1296,6 +1650,103 @@ def browse_collection(
         """,
         (collection_id, limit, offset),
     ).fetchall()
+
+
+def delete_export_asset_from_catalog(
+    connection: sqlite3.Connection,
+    catalog_root: Path,
+    asset_id: str,
+    *,
+    commit: bool = True,
+) -> dict[str, object]:
+    asset_row = connection.execute(
+        """
+        SELECT asset_id, asset_type, canonical_path
+        FROM assets
+        WHERE asset_id = ?
+        """,
+        (asset_id,),
+    ).fetchone()
+    if asset_row is None or str(asset_row["asset_type"]) != "export":
+        raise ValueError(f"unknown export asset: {asset_id}")
+
+    deleted_preview_paths: list[str] = []
+    preview_rows = connection.execute(
+        "SELECT relative_path FROM preview_entries WHERE asset_id = ?",
+        (asset_id,),
+    ).fetchall()
+    for row in preview_rows:
+        relative_path = str(row["relative_path"] or "")
+        if not relative_path:
+            continue
+        preview_path = (catalog_root / relative_path).resolve()
+        try:
+            preview_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        deleted_preview_paths.append(str(preview_path))
+    connection.execute("DELETE FROM preview_entries WHERE asset_id = ?", (asset_id,))
+
+    set_row = get_resource_set_for_asset(connection, asset_id)
+    if set_row is not None:
+        set_id = str(set_row["set_id"])
+        if str(set_row["raw_asset_id"]) == asset_id:
+            connection.execute(
+                "UPDATE resource_sets SET raw_asset_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE set_id = ?",
+                (set_id,),
+            )
+        connection.execute(
+            "DELETE FROM resource_set_items WHERE set_id = ? AND asset_id = ?",
+            (set_id, asset_id),
+        )
+        next_primary_row = connection.execute(
+            """
+            SELECT asset_id
+            FROM resource_set_items
+            WHERE set_id = ?
+              AND role != 'raw'
+            ORDER BY sort_order, created_at, asset_id
+            LIMIT 1
+            """,
+            (set_id,),
+        ).fetchone()
+        if next_primary_row is not None:
+            next_primary_asset_id = str(next_primary_row["asset_id"])
+            connection.execute(
+                "UPDATE resource_sets SET primary_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE set_id = ?",
+                (next_primary_asset_id, set_id),
+            )
+            connection.execute(
+                "UPDATE resource_set_items SET role = 'version' WHERE set_id = ? AND role = 'primary'",
+                (set_id,),
+            )
+            connection.execute(
+                "UPDATE resource_set_items SET role = 'primary' WHERE set_id = ? AND asset_id = ?",
+                (set_id, next_primary_asset_id),
+            )
+        else:
+            connection.execute("DELETE FROM resource_sets WHERE set_id = ?", (set_id,))
+
+    connection.execute("DELETE FROM collection_items WHERE asset_id = ?", (asset_id,))
+    connection.execute(
+        "DELETE FROM export_lookup_registry WHERE export_asset_id = ? OR raw_asset_id = ?",
+        (asset_id, asset_id),
+    )
+    connection.execute(
+        "DELETE FROM asset_links WHERE parent_asset_id = ? OR child_asset_id = ?",
+        (asset_id, asset_id),
+    )
+    connection.execute("DELETE FROM asset_files WHERE asset_id = ?", (asset_id,))
+    connection.execute("DELETE FROM assets WHERE asset_id = ?", (asset_id,))
+
+    if commit:
+        connection.commit()
+
+    return {
+        "asset_id": asset_id,
+        "export_path": str(asset_row["canonical_path"]),
+        "preview_files_deleted": deleted_preview_paths,
+    }
 
 
 def set_asset_rating(

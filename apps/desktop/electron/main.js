@@ -988,6 +988,16 @@ ipcMain.handle("workspace:quick-register", async (_event, exportPath, originPath
   return await callSidecarJsonAsync(command);
 });
 
+ipcMain.handle("workspace:delete-export-assets", async (_event, assetIds) => {
+  const ids = [...new Set((assetIds || []).filter(Boolean))];
+  if (!ids.length) return [];
+  const command = ["delete-export-assets"];
+  for (const assetId of ids) {
+    command.push("--asset-id", String(assetId));
+  }
+  return await callSidecarJsonAsync(command) || [];
+});
+
 ipcMain.handle("workspace:info", () => workspaceInfo());
 
 // --- Collections ---
