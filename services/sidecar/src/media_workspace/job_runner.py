@@ -2,10 +2,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .ai_repaint import DEFAULT_GEMINI_MODEL, run_mock_repaint, run_nanobanana_repaint
 from .catalog import ensure_catalog
 from .config import Thresholds
-from .db import update_job
+from .db import (
+    get_app_setting,
+    update_job,
+    upsert_export_asset,
+    upsert_preview_entry,
+    upsert_registry,
+)
+from .metadata import extract_export_candidate
+from .models import MatchDecision
 from .preview_service import PreviewService
+from .reverse_lookup import resolve_export
 from .reverse_lookup import resolve_export_batch
 from .scanner import enrich_raw_assets, scan_raw_directory
 
@@ -374,6 +384,159 @@ def run_preview_job(
             error_text=None,
         )
         return result
+    except Exception as error:
+        update_job(
+            connection,
+            job_id,
+            status="failed",
+            payload=payload,
+            result={},
+            progress=0.0,
+            error_text=str(error),
+        )
+        raise
+
+
+def run_ai_repaint_job(
+    connection,
+    catalog_path: Path,
+    job_id: str,
+    *,
+    provider: str,
+    input_path: Path,
+    output_path: Path,
+    prompt: str,
+    api_key: str | None = None,
+    origin_path: Path | None = None,
+    aspect_ratio: str | None = None,
+    image_size: str | None = None,
+    temperature: float | None = None,
+) -> dict[str, object]:
+    payload = {
+        "provider": provider,
+        "input_path": str(input_path.resolve()),
+        "output_path": str(output_path.resolve()),
+        "origin_path": str(origin_path.resolve()) if origin_path else None,
+        "prompt": prompt,
+        "api_key_supplied": bool(api_key),
+        "aspect_ratio": aspect_ratio,
+        "image_size": image_size,
+        "temperature": temperature,
+        "phase": "generate_ai_repaint",
+        "phase_label": "Generate AI Repaint",
+        "phase_index": 1,
+        "phase_count": 1,
+    }
+    update_job(connection, job_id, status="running", payload=payload, progress=0.1, result={"current_phase": {"status": "running"}}, error_text=None)
+    try:
+        if provider == "mock":
+            result = run_mock_repaint(
+                input_path=input_path,
+                output_path=output_path,
+                prompt=prompt,
+            )
+        else:
+            effective_api_key = api_key
+            if not effective_api_key:
+                provider_key = f"ai_provider_token:{provider}"
+                config = get_app_setting(connection, provider_key)
+                effective_api_key = config.get("token") if isinstance(config, dict) else None
+            if not effective_api_key:
+                raise ValueError(f"No API token configured for provider '{provider}'.")
+            result = run_nanobanana_repaint(
+                input_path=input_path,
+                output_path=output_path,
+                prompt=prompt,
+                api_key=effective_api_key,
+                model=DEFAULT_GEMINI_MODEL,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+            )
+
+        candidate = extract_export_candidate(Path(result.output_path), fingerprint_mode="head-only")
+        asset_id = upsert_export_asset(connection, candidate, commit=True)
+
+        match_status = "unmatched"
+        match_score = 0.0
+        raw_asset_id = None
+        if origin_path:
+            origin = str(origin_path.resolve())
+            origin_row = connection.execute(
+                """
+                SELECT registry.raw_asset_id, registry.score
+                FROM asset_files
+                JOIN export_lookup_registry AS registry ON registry.export_asset_id = asset_files.asset_id
+                WHERE asset_files.path = ?
+                  AND registry.raw_asset_id IS NOT NULL
+                """,
+                (origin,),
+            ).fetchone()
+            if origin_row:
+                raw_asset_id = origin_row[0]
+                match_score = origin_row[1] or 1.0
+                match_status = "auto_bound"
+
+        if not raw_asset_id:
+            decision = resolve_export(connection, Path(result.output_path), thresholds=Thresholds(), refresh=True)
+            match_status = decision.status
+            match_score = decision.score
+            raw_asset_id = decision.raw_asset_id
+        else:
+            reg_decision = MatchDecision(
+                export_asset_id=asset_id,
+                export_path=Path(result.output_path),
+                status=match_status,
+                score=match_score,
+                raw_asset_id=raw_asset_id,
+                feature_vector={},
+            )
+            upsert_registry(connection, reg_decision, commit=True)
+
+        preview_service = PreviewService(ensure_catalog(catalog_path))
+        row = connection.execute(
+            """
+            SELECT asset_id, asset_type, canonical_path, extension,
+                   json_extract(metadata_json, '$.width') AS width,
+                   json_extract(metadata_json, '$.height') AS height
+            FROM assets WHERE asset_id = ?
+            """,
+            (asset_id,),
+        ).fetchone()
+        if row:
+            preview_result = preview_service.generate_for_row(row, kind="preview", force=False)
+            upsert_preview_entry(
+                connection,
+                asset_id,
+                "preview",
+                preview_result.relative_path,
+                preview_result.width,
+                preview_result.height,
+                preview_result.status,
+                commit=True,
+            )
+
+        final_result = {
+            "provider": result.provider,
+            "model": result.model,
+            "output_path": result.output_path,
+            "mime_type": result.mime_type,
+            "prompt": result.prompt,
+            "notes": result.notes,
+            "asset_id": asset_id,
+            "match_status": match_status,
+            "score": match_score,
+            "current_phase": None,
+        }
+        update_job(
+            connection,
+            job_id,
+            status="succeeded",
+            payload={**payload, "phase": None, "phase_label": None},
+            result=final_result,
+            progress=1.0,
+            error_text=None,
+        )
+        return final_result
     except Exception as error:
         update_job(
             connection,

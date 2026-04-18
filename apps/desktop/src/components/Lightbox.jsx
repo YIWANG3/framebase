@@ -26,6 +26,7 @@ function OverlayButton({ children, className = "", ...props }) {
 }
 
 function ActionPill({ icon: Icon, label, shortcut, active = false, className = "", ...props }) {
+  const { onClick, ...restProps } = props;
   return (
     <button
       type="button"
@@ -36,7 +37,11 @@ function ActionPill({ icon: Icon, label, shortcut, active = false, className = "
           : "border-white/12 bg-black/26 text-white/80 hover:border-white/18 hover:bg-black/36 hover:text-white",
         className,
       ].join(" ")}
-      {...props}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.(event);
+      }}
+      {...restProps}
     >
       <Icon className="h-3.5 w-3.5" />
       <span>{label}</span>
@@ -428,7 +433,7 @@ export default function Lightbox({
       >
           <button
             type="button"
-            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/10 hover:text-white"
             onClick={() => zoomFromCenter(scale / 1.35)}
           >
             <Minus className="h-3.5 w-3.5" />
@@ -445,14 +450,14 @@ export default function Lightbox({
           />
           <button
             type="button"
-            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/10 hover:text-white"
             onClick={() => zoomFromCenter(scale * 1.35)}
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
-            className="pointer-events-auto ml-1 rounded px-2 py-0.5 text-[11px] tabular-nums text-white/50 transition-colors hover:bg-white/10 hover:text-white/80"
+            className="pointer-events-auto ml-1 rounded-md px-2 py-0.5 text-[11px] tabular-nums text-white/50 transition-colors hover:bg-white/10 hover:text-white/80"
             onClick={() => resetToFit()}
             title="Reset to fit"
           >

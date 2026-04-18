@@ -109,7 +109,7 @@ export default function Inspector({ detail, onRatingChange }) {
           ) : (
             <div className="flex items-center justify-center text-[12px] text-muted">No preview</div>
           )}
-          <span className="absolute left-2 top-2 rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-medium text-white">
+          <span className="absolute left-2 top-2 rounded-full bg-black/45 px-1.5 py-0.5 text-[10px] font-medium text-white">
             {formatValue}
           </span>
         </div>

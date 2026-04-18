@@ -9,14 +9,17 @@ import {
   Redo2,
   RotateCcw,
   RotateCw,
+  Sparkles,
   Undo2,
   X,
 } from "lucide-react";
 import { fileName, localFileUrl } from "../utils/format";
 import { ASPECT_PRESETS, getAspectRatio, resizeCropRect } from "./editor/cropMath";
+import AiRepaintPanel from "./editor/AiRepaintPanel";
+import BeforeAfterCompare from "./editor/BeforeAfterCompare";
 
 const PREVIEW_MAX_EDGE = 2200;
-const PANEL_WIDTH = 252;
+const PANEL_WIDTH = 320;
 const PANEL_GAP = 24;
 const CANVAS_SIDE_PADDING = 48;
 const HANDLE_LENGTH = 24;
@@ -159,7 +162,7 @@ function FooterButton({ icon: Icon, label, onClick, disabled = false, primary = 
       disabled={disabled}
       onClick={onClick}
       className={[
-        "inline-flex h-8 items-center rounded-lg text-[11px] font-medium transition-colors disabled:cursor-default disabled:opacity-35",
+        "inline-flex h-8 items-center rounded-md text-[11px] font-medium transition-colors disabled:cursor-default disabled:opacity-35",
         label ? "gap-1.5 px-3" : "w-8 justify-center",
         primary
           ? "bg-[rgb(var(--accent-color))] text-black hover:brightness-110"
@@ -177,7 +180,7 @@ function ToolTab({ active, icon: Icon, label, onClick }) {
     <button
       type="button"
       className={[
-        "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+        "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
         active
           ? "bg-[rgb(var(--accent-color)/0.16)] text-[rgb(var(--accent-color))]"
           : "text-muted2 hover:bg-hover hover:text-text",
@@ -385,7 +388,7 @@ function AspectButton({ preset, active, onClick }) {
     <button
       type="button"
       className={[
-        "flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] transition-colors",
+        "flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-[11px] transition-colors",
         active ? "bg-selected text-accent" : "text-muted hover:bg-hover hover:text-text",
       ].join(" ")}
       onClick={onClick}
@@ -577,6 +580,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [activeInteraction, setActiveInteraction] = useState(null);
+  const [compareState, setCompareState] = useState(null); // { afterPath, layout: "side"|"stack" }
 
   const sourcePath = item?.export_path || item?.export_preview_path || item?.raw_preview_path || null;
   const sourceLabel = fileName(sourcePath) || item?.stem || "Selected asset";
@@ -593,6 +597,12 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
   } = editorState;
   const discreteRotationDeg = quarterTurns * 90;
   const rotationDeg = discreteRotationDeg + freeAngle;
+  const showCropUi = tool === "crop";
+  const panelMeta = tool === "crop"
+    ? { title: "Crop", badge: null }
+    : tool === "ai"
+      ? { title: "AI Repaint", badge: null }
+      : { title: "Other Tools", badge: null };
 
   function syncHistory(nextHistory, nextIndex) {
     historyRef.current = nextHistory;
@@ -621,6 +631,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
     let active = true;
     setTool("crop");
     setMessage("");
+    setCompareState(null);
     setLoadState("loading");
     setSourceImage(null);
     setPreviewSource(null);
@@ -970,6 +981,12 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
     }
     console.log("[Editor] setup wheel attached to viewport", el);
     function onWheel(event) {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-editor-wheel-scope='panel'], [data-editor-wheel-scope='toolbar']")
+      ) {
+        return;
+      }
       console.log("[Editor] onWheel RAW - deltaX:", event.deltaX, "deltaY:", event.deltaY, "ctrl:", event.ctrlKey);
       const { transformedPreview: tp, placement: pl } = handleWheelRef.current || {};
       if (!tp || !pl) {
@@ -1280,8 +1297,16 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
 
   useEffect(() => {
     if (!open) return undefined;
+    function shouldIgnoreKey(event) {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return false;
+      const tagName = target.tagName;
+      return target.isContentEditable || tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+    }
+
     function handleKeyDown(event) {
       if (event.defaultPrevented) return;
+      if (shouldIgnoreKey(event)) return;
       if (event.key === "Escape") {
         event.preventDefault();
         onClose?.();
@@ -1306,6 +1331,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
       }
     }
     function handleKeyUp(event) {
+      if (shouldIgnoreKey(event)) return;
       if (event.key === " ") {
         setSpacePressed(false);
       }
@@ -1387,7 +1413,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
             </div>
 
             {/* Non-rotating crop overlay — stays axis-aligned, z-10 above rotated image */}
-            {cropRect ? (
+            {showCropUi && cropRect ? (
               <div className="pointer-events-none absolute inset-0" style={{ zIndex: 10 }}>
                 <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: `${cropRect.y}px`, backgroundColor: "rgba(0,0,0,0.65)" }} />
                 <div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ height: `${viewportSize.height - cropRect.y - cropRect.height}px`, backgroundColor: "rgba(0,0,0,0.65)" }} />
@@ -1432,7 +1458,19 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
         ) : null}
 
         <div className="pointer-events-none absolute right-3 top-1/2 z-20 flex -translate-y-1/2 items-center gap-3">
-          <div className="pointer-events-auto w-[252px] overflow-hidden rounded-2xl border border-border/60 bg-chrome/95 shadow-overlay backdrop-blur-xl">
+          <div
+            className="pointer-events-auto overflow-hidden rounded-xl border border-border/60 bg-chrome/95 shadow-overlay backdrop-blur-xl"
+            style={{ width: `${PANEL_WIDTH}px` }}
+            data-editor-wheel-scope="panel"
+          >
+            <div className="flex h-6 items-center justify-between border-b border-border/60 bg-black/20 px-3">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--accent-color)/0.72)]">{panelMeta.title}</div>
+              {panelMeta.badge ? (
+                <div className="rounded-full bg-[rgb(var(--accent-color)/0.10)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[rgb(var(--accent-color))]">
+                  {panelMeta.badge}
+                </div>
+              ) : null}
+            </div>
             {tool === "crop" ? (
               <>
                 <div className="max-h-[calc(100vh-10rem)] overflow-y-auto">
@@ -1455,7 +1493,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
                     <div className="mt-3 grid grid-cols-2 gap-1.5">
                       <button
                         type="button"
-                        className="flex items-center justify-center gap-2 rounded-lg bg-app px-3 py-2 text-[11px] text-muted transition-colors hover:bg-hover hover:text-text"
+                        className="flex items-center justify-center gap-2 rounded-md bg-app px-3 py-2 text-[11px] text-muted transition-colors hover:bg-hover hover:text-text"
                         onClick={() => commitTransform({ quarterTurns: ((quarterTurns - 1) % 4 + 4) % 4, freeAngle: 0 })}
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
@@ -1463,7 +1501,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
                       </button>
                       <button
                         type="button"
-                        className="flex items-center justify-center gap-2 rounded-lg bg-app px-3 py-2 text-[11px] text-muted transition-colors hover:bg-hover hover:text-text"
+                        className="flex items-center justify-center gap-2 rounded-md bg-app px-3 py-2 text-[11px] text-muted transition-colors hover:bg-hover hover:text-text"
                         onClick={() => commitTransform({ quarterTurns: (quarterTurns + 1) % 4, freeAngle: 0 })}
                       >
                         <RotateCw className="h-3.5 w-3.5" />
@@ -1472,7 +1510,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
                       <button
                         type="button"
                         className={[
-                          "flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-[11px] transition-colors",
+                          "flex items-center justify-center gap-2 rounded-md px-3 py-2 text-[11px] transition-colors",
                           flipX ? "bg-selected text-accent" : "bg-app text-muted hover:bg-hover hover:text-text",
                         ].join(" ")}
                         onClick={() => commitTransform({ flipX: !flipX })}
@@ -1483,7 +1521,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
                       <button
                         type="button"
                         className={[
-                          "flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-[11px] transition-colors",
+                          "flex items-center justify-center gap-2 rounded-md px-3 py-2 text-[11px] transition-colors",
                           flipY ? "bg-selected text-accent" : "bg-app text-muted hover:bg-hover hover:text-text",
                         ].join(" ")}
                         onClick={() => commitTransform({ flipY: !flipY })}
@@ -1532,31 +1570,41 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
                   <FooterButton icon={Check} label="Apply" onClick={handleApply} disabled={loadState !== "ready"} primary />
                 </div>
               </>
+            ) : tool === "ai" ? (
+              <AiRepaintPanel sourcePath={sourcePath} sourceLabel={sourceLabel} onCompareChange={setCompareState} compareState={compareState} />
             ) : (
               <div className="px-4 py-4">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted2">Other Tools</div>
-                <div className="mt-3 rounded-xl bg-app px-3 py-3 text-[12px] leading-6 text-muted">
+                <div className="mt-3 rounded-lg bg-app px-3 py-3 text-[12px] leading-6 text-muted">
                   Crop is the active tool. Other tools stay grouped here until the crop workflow feels right.
                 </div>
               </div>
             )}
           </div>
 
-          <div className="pointer-events-auto flex w-12 flex-col items-center gap-2 rounded-2xl border border-border/60 bg-chrome/95 p-1.5 shadow-overlay backdrop-blur-xl">
+          <div
+            className="pointer-events-auto flex w-12 flex-col items-center gap-2 rounded-xl border border-border/60 bg-chrome/95 p-1.5 shadow-overlay backdrop-blur-xl"
+            data-editor-wheel-scope="toolbar"
+          >
             <ToolTab active={tool === "crop"} icon={Crop} label="Crop" onClick={() => setTool("crop")} />
+            <ToolTab active={tool === "ai"} icon={Sparkles} label="AI Repaint" onClick={() => setTool("ai")} />
             <ToolTab active={tool === "other"} icon={MoreHorizontal} label="Other Tools" onClick={() => setTool("other")} />
           </div>
         </div>
 
-        <AngleRuler
-          value={freeAngle}
-          viewportWidth={viewportSize.width}
-          viewportHeight={viewportSize.height}
-          centerX={placement?.centerX ?? (CANVAS_SIDE_PADDING + Math.max(200, viewportSize.width - PANEL_WIDTH - PANEL_GAP - CANVAS_SIDE_PADDING * 2) / 2 - 26)}
-          onChangeStart={beginAngleDrag}
-          onChange={updateAngle}
-          onChangeEnd={endAngleDrag}
-        />
+        {showCropUi ? (
+          <AngleRuler
+            value={freeAngle}
+            viewportWidth={viewportSize.width}
+            viewportHeight={viewportSize.height}
+            centerX={placement?.centerX ?? (CANVAS_SIDE_PADDING + Math.max(200, viewportSize.width - PANEL_WIDTH - PANEL_GAP - CANVAS_SIDE_PADDING * 2) / 2 - 26)}
+            onChangeStart={beginAngleDrag}
+            onChange={updateAngle}
+            onChangeEnd={endAngleDrag}
+          />
+        ) : null}
+
+        {/* Compare overlay rendered outside viewport */}
       </div>
 
       <div className="flex h-8 shrink-0 items-center justify-between border-t border-border/60 bg-chrome px-3 text-[11px] text-muted">
@@ -1573,7 +1621,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
             const nativeOrigW = sourceWidth;
             const nativeOrigH = sourceHeight;
 
-            if (!cropRect) return `${nativeOrigW} × ${nativeOrigH} original`;
+            if (!showCropUi || !cropRect) return `${nativeOrigW} × ${nativeOrigH} original`;
 
             const cropW = Math.round(cropRect.width * scale);
             const cropH = Math.round(cropRect.height * scale);
@@ -1582,6 +1630,16 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
         </div>
         <div>{saving ? "Saving…" : message || " "}</div>
       </div>
+
+      {compareState?.afterPath && sourcePath ? (
+        <BeforeAfterCompare
+          beforePath={sourcePath}
+          afterPath={compareState.afterPath}
+          layout={compareState.layout || "side"}
+          onClose={() => setCompareState(null)}
+          onLayoutChange={(layout) => setCompareState((s) => s ? { ...s, layout } : s)}
+        />
+      ) : null}
     </div>
   );
 }

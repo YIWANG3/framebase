@@ -25,7 +25,7 @@ function InlineEdit({ initial, onConfirm, onCancel }) {
   return (
     <input
       ref={ref}
-      className="w-full rounded bg-hover px-1.5 py-0.5 text-[13px] text-text outline-none ring-1 ring-accent/60"
+      className="w-full rounded-md bg-hover px-2 py-0.5 text-[13px] text-text outline-none border border-accent/50"
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onBlur={commit}
@@ -111,7 +111,7 @@ export default function Sidebar({
                   setStatus(item.key);
                 }}
                 className={[
-                  "flex w-full items-center justify-between rounded-md px-2.5 py-[6px] text-left transition-colors",
+                  "flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left transition-colors",
                   active
                     ? "bg-selected text-text"
                     : "text-muted hover:bg-hover/70 hover:text-text",
@@ -132,7 +132,7 @@ export default function Sidebar({
             <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted2">Folders</span>
             <button
               type="button"
-              className="rounded p-0.5 text-muted2 transition-colors hover:bg-hover hover:text-text"
+              className="rounded-md p-0.5 text-muted2 transition-colors hover:bg-hover hover:text-text"
               title="New folder"
               onClick={() => setCreatingFolder(true)}
             >
@@ -205,7 +205,7 @@ export default function Sidebar({
                     await onAddToCollection?.(col.collection_id, assetIds);
                   }}
                   className={[
-                    "group flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-[6px] text-left transition-colors",
+                    "group flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-left transition-colors",
                     dropTargetId === col.collection_id && !active
                       ? "bg-hover text-text ring-1 ring-accent/45"
                       : "",
@@ -225,7 +225,7 @@ export default function Sidebar({
                     <span className="hidden gap-0.5 group-hover:flex">
                       <button
                         type="button"
-                        className="rounded p-0.5 text-muted2 hover:text-text"
+                        className="rounded-md p-0.5 text-muted2 hover:text-text"
                         title="Rename"
                         onClick={(e) => { e.stopPropagation(); setEditingId(col.collection_id); }}
                       >
@@ -233,7 +233,7 @@ export default function Sidebar({
                       </button>
                       <button
                         type="button"
-                        className="rounded p-0.5 text-muted2 hover:text-red-400"
+                        className="rounded-md p-0.5 text-muted2 hover:text-red-400"
                         title="Delete"
                         onClick={(e) => { e.stopPropagation(); onDeleteCollection?.(col.collection_id); }}
                       >

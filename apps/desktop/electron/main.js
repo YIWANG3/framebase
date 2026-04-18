@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
 const { spawn, spawnSync } = require("node:child_process");
 const os = require("node:os");
+const crypto = require("node:crypto");
 const sharp = require("sharp");
 
 protocol.registerSchemesAsPrivileged([
@@ -43,6 +44,70 @@ function resolveCatalogPath() {
 }
 
 let currentCatalogPath = resolveCatalogPath();
+
+function getAppSettingsPath() {
+  return path.join(app.getPath("userData"), "framebase", "settings.json");
+}
+
+function readAppSettings() {
+  const settingsPath = getAppSettingsPath();
+  try {
+    return JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+  } catch (error) {
+    return {};
+  }
+}
+
+async function writeAppSettings(settings) {
+  const settingsPath = getAppSettingsPath();
+  await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
+  await fs.promises.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf-8");
+}
+
+function getStoredProviderConfig(provider) {
+  const settings = readAppSettings();
+  return settings?.aiProviders?.[provider] || null;
+}
+
+async function setStoredProviderConfig(provider, config) {
+  const settings = readAppSettings();
+  const next = {
+    ...settings,
+    aiProviders: {
+      ...(settings.aiProviders || {}),
+      [provider]: config,
+    },
+  };
+  await writeAppSettings(next);
+  return next.aiProviders[provider];
+}
+
+async function deleteStoredProviderConfig(provider) {
+  const settings = readAppSettings();
+  const nextProviders = { ...(settings.aiProviders || {}) };
+  delete nextProviders[provider];
+  await writeAppSettings({
+    ...settings,
+    aiProviders: nextProviders,
+  });
+}
+
+async function getStoredProviderConfigWithMigration(provider) {
+  const existing = getStoredProviderConfig(provider);
+  if (existing?.token) {
+    return existing;
+  }
+  try {
+    const payload = await callSidecarJsonAsync(["get-provider-token", "--provider", provider]);
+    if (payload?.token) {
+      const migrated = await setStoredProviderConfig(provider, payload);
+      return migrated;
+    }
+  } catch (error) {
+    console.warn("[ai-provider-token] migration lookup failed:", error);
+  }
+  return existing || null;
+}
 
 function prepareCatalogPath() {
   fs.mkdirSync(currentCatalogPath, { recursive: true });
@@ -458,6 +523,73 @@ function startPreviewTask() {
   return formatJobStatus(job);
 }
 
+function deriveAiRepaintOutputPath(sourcePath) {
+  const source = path.resolve(sourcePath);
+  const ext = ".png";
+  const parsed = path.parse(source);
+  const shortId = crypto.randomBytes(4).toString("hex");
+  return path.join(parsed.dir, `${parsed.name}_ai-repaint_${shortId}${ext}`);
+}
+
+async function startAiRepaintTask(options) {
+  const sourcePath = String(options?.sourcePath || "");
+  const prompt = String(options?.prompt || "");
+  const provider = String(options?.provider || "nanobanana");
+  if (!sourcePath) {
+    throw new Error("Missing source image");
+  }
+  if (!prompt.trim()) {
+    throw new Error("Missing prompt");
+  }
+  const current = latestJobStatus("ai_repaint");
+  if (current.running) {
+    return current;
+  }
+  const providerConfig = await getStoredProviderConfigWithMigration(provider);
+  const apiKey = providerConfig?.token || null;
+  if (!apiKey) {
+    throw new Error(`No API token configured for ${provider}.`);
+  }
+  const outputPath = options?.outputPath || deriveAiRepaintOutputPath(sourcePath);
+  const payload = {
+    provider,
+    source_path: sourcePath,
+    output_path: outputPath,
+    prompt,
+    aspect_ratio: options?.aspectRatio || null,
+    image_size: options?.resolution ? String(options.resolution).toUpperCase() : null,
+    temperature: typeof options?.temperature === "number" ? options.temperature : null,
+  };
+  const job = createJob("ai_repaint", payload);
+  const command = [
+    "run-ai-repaint-job",
+    "--job-id",
+    job.job_id,
+    "--provider",
+    provider,
+    "--input",
+    sourcePath,
+    "--output",
+    outputPath,
+    "--origin-path",
+    sourcePath,
+    "--prompt",
+    prompt,
+  ];
+  if (payload.aspect_ratio) {
+    command.push("--aspect-ratio", payload.aspect_ratio);
+  }
+  if (payload.image_size) {
+    command.push("--image-size", payload.image_size);
+  }
+  if (typeof payload.temperature === "number") {
+    command.push("--temperature", String(payload.temperature));
+  }
+  command.push("--api-key", apiKey);
+  launchSidecarJob(command);
+  return formatJobStatus(job);
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440,
@@ -527,6 +659,9 @@ function buildAppMenu() {
         { label: "Run Enrichment", click: () => sendMenuAction("import:enrich") },
         { label: "Generate Previews", click: () => sendMenuAction("import:previews") },
       ],
+    },
+    {
+      role: "editMenu",
     },
     {
       label: "View",
@@ -606,6 +741,37 @@ ipcMain.handle("workspace:enrich-start", () => startEnrichmentTask());
 ipcMain.handle("workspace:preview-status", () => latestJobStatus("preview"));
 
 ipcMain.handle("workspace:preview-start", () => startPreviewTask());
+
+ipcMain.handle("workspace:ai-repaint-status", () => latestJobStatus("ai_repaint"));
+
+ipcMain.handle("workspace:ai-repaint-start", (_event, options) => startAiRepaintTask(options));
+
+ipcMain.handle("workspace:get-ai-styles", () => {
+  const settings = readAppSettings();
+  console.log("[ai-styles] loading", settings?.aiStyles ? settings.aiStyles.length : 0, "styles");
+  return settings?.aiStyles ?? null;
+});
+
+ipcMain.handle("workspace:save-ai-styles", async (_event, styles) => {
+  console.log("[ai-styles] saving", Array.isArray(styles) ? styles.length : "non-array", "styles");
+  const settings = readAppSettings();
+  await writeAppSettings({ ...settings, aiStyles: styles });
+  console.log("[ai-styles] saved to", getAppSettingsPath());
+});
+
+ipcMain.handle("workspace:get-ai-provider-token", async (_event, provider) => {
+  return await getStoredProviderConfigWithMigration(String(provider || "")) || {};
+});
+
+ipcMain.handle("workspace:set-ai-provider-token", async (_event, provider, token) => {
+  const next = await setStoredProviderConfig(String(provider || ""), { token: String(token || "") });
+  return next || {};
+});
+
+ipcMain.handle("workspace:delete-ai-provider-token", async (_event, provider) => {
+  await deleteStoredProviderConfig(String(provider || ""));
+  return { provider: String(provider || ""), configured: false };
+});
 
 ipcMain.handle("workspace:pending", () => {
   const payload = callSidecar(["list-pending"]);

@@ -31,7 +31,7 @@ module.exports = {
         "card-hover": "0 8px 24px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15)",
       },
       borderRadius: {
-        app: "12px",
+        app: "8px",
       },
       gridTemplateColumns: {
         app: "var(--sidebar-width, 240px) minmax(0, 1fr) var(--inspector-width, 300px)",

@@ -9,6 +9,7 @@ import Inspector from "./components/Inspector";
 import ImportOverlay from "./components/ImportOverlay";
 import Lightbox from "./components/Lightbox";
 import EditorOverlay from "./components/EditorOverlay";
+import DesignSystemPanel from "./components/DesignSystemPanel";
 
 export default function App() {
   const workspace = useWorkspace();
@@ -512,6 +513,7 @@ export default function App() {
           await workspace.refreshAll?.();
         }}
       />
+      <DesignSystemPanel />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import json
 from pathlib import Path
 
@@ -8,13 +9,16 @@ from .benchmark import benchmark_dataset
 from .catalog import ensure_catalog
 from .config import Thresholds
 from .analysis import analyze_metadata_coverage
+from .ai_repaint import DEFAULT_GEMINI_MODEL, run_mock_repaint, run_nanobanana_repaint
 from .db import (
     cleanup_orphan_export_assets,
     confirm_match,
     connect,
     create_job,
+    delete_app_setting,
     get_export_asset_detail,
     get_export_asset_detail_by_path,
+    get_app_setting,
     get_job,
     get_latest_job,
     init_db,
@@ -33,18 +37,23 @@ from .db import (
     remove_collection_items,
     browse_collection,
     set_asset_rating,
+    set_app_setting,
     upsert_export_asset,
     upsert_registry,
 )
 from .evaluation import evaluate_ground_truth
 from .ground_truth import export_ground_truth
-from .job_runner import run_enrichment_job, run_import_job, run_preview_job
+from .job_runner import run_ai_repaint_job, run_enrichment_job, run_import_job, run_preview_job
 from .preview_service import PreviewService
 from .metadata import extract_export_candidate
 from .models import MatchDecision
 from .reverse_lookup import resolve_export, resolve_export_batch
 from .scanner import enrich_raw_assets, scan_raw_directory
 from .watcher import ExportWatcher
+
+
+def _provider_token_key(provider: str) -> str:
+    return f"ai_provider_token:{provider}"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -187,17 +196,17 @@ def build_parser() -> argparse.ArgumentParser:
     register_roots_parser.add_argument("--path", type=Path, action="append", required=True)
 
     create_job_parser = subparsers.add_parser("create-job", parents=[common])
-    create_job_parser.add_argument("--job-type", choices=["import", "enrichment", "preview"], required=True)
+    create_job_parser.add_argument("--job-type", choices=["import", "enrichment", "preview", "ai_repaint"], required=True)
     create_job_parser.add_argument("--payload-json", default="{}")
 
     get_job_parser = subparsers.add_parser("get-job", parents=[common])
     get_job_parser.add_argument("--job-id", required=True)
 
     latest_job_parser = subparsers.add_parser("latest-job", parents=[common])
-    latest_job_parser.add_argument("--job-type", choices=["import", "enrichment", "preview"])
+    latest_job_parser.add_argument("--job-type", choices=["import", "enrichment", "preview", "ai_repaint"])
 
     list_jobs_parser = subparsers.add_parser("list-jobs", parents=[common])
-    list_jobs_parser.add_argument("--job-type", choices=["import", "enrichment", "preview"])
+    list_jobs_parser.add_argument("--job-type", choices=["import", "enrichment", "preview", "ai_repaint"])
     list_jobs_parser.add_argument("--limit", type=int, default=20)
 
     run_import_job_parser = subparsers.add_parser("run-import-job", parents=[common])
@@ -221,8 +230,40 @@ def build_parser() -> argparse.ArgumentParser:
     run_preview_job_parser.add_argument("--limit", type=int)
     run_preview_job_parser.add_argument("--force", action="store_true")
 
+    get_provider_token = subparsers.add_parser("get-provider-token", parents=[common])
+    get_provider_token.add_argument("--provider", required=True)
+
+    set_provider_token = subparsers.add_parser("set-provider-token", parents=[common])
+    set_provider_token.add_argument("--provider", required=True)
+    set_provider_token.add_argument("--token", required=True)
+
+    delete_provider_token = subparsers.add_parser("delete-provider-token", parents=[common])
+    delete_provider_token.add_argument("--provider", required=True)
+
+    run_ai_repaint_job_parser = subparsers.add_parser("run-ai-repaint-job", parents=[common])
+    run_ai_repaint_job_parser.add_argument("--job-id", required=True)
+    run_ai_repaint_job_parser.add_argument("--provider", choices=["nanobanana", "mock"], default="nanobanana")
+    run_ai_repaint_job_parser.add_argument("--input", type=Path, required=True)
+    run_ai_repaint_job_parser.add_argument("--output", type=Path, required=True)
+    run_ai_repaint_job_parser.add_argument("--prompt", required=True)
+    run_ai_repaint_job_parser.add_argument("--origin-path", type=Path)
+    run_ai_repaint_job_parser.add_argument("--aspect-ratio")
+    run_ai_repaint_job_parser.add_argument("--image-size", choices=["1K", "2K", "4K"])
+    run_ai_repaint_job_parser.add_argument("--temperature", type=float)
+    run_ai_repaint_job_parser.add_argument("--api-key")
+
     summary_parser = subparsers.add_parser("summary", parents=[common])
     summary_parser.add_argument("--json", action="store_true")
+
+    repaint = subparsers.add_parser("ai-repaint", parents=[common])
+    repaint.add_argument("--provider", choices=["nanobanana", "mock"], default="nanobanana")
+    repaint.add_argument("--input", type=Path, required=True)
+    repaint.add_argument("--output", type=Path, required=True)
+    repaint.add_argument("--prompt", required=True)
+    repaint.add_argument("--api-key")
+    repaint.add_argument("--model", default=DEFAULT_GEMINI_MODEL)
+    repaint.add_argument("--aspect-ratio")
+    repaint.add_argument("--image-size", choices=["1K", "2K", "4K"])
 
     return parser
 
@@ -256,16 +297,67 @@ def main() -> int:
     catalog = ensure_catalog(args.catalog)
     fresh_db = not catalog.db_path.exists()
     connection = connect(catalog.db_path)
-
-    if args.command == "init-catalog":
-        init_db(connection)
-        set_catalog_path(connection, catalog.root)
-        print(f"initialized {catalog.root}")
-        return 0
-
     init_db(connection)
     if fresh_db:
         set_catalog_path(connection, catalog.root)
+
+    if args.command == "get-provider-token":
+        payload = get_app_setting(connection, _provider_token_key(args.provider))
+        print(json.dumps(payload or {}, indent=2))
+        return 0
+
+    if args.command == "set-provider-token":
+        set_app_setting(connection, _provider_token_key(args.provider), {"token": args.token})
+        print(json.dumps({"provider": args.provider, "configured": True}, indent=2))
+        return 0
+
+    if args.command == "delete-provider-token":
+        delete_app_setting(connection, _provider_token_key(args.provider))
+        print(json.dumps({"provider": args.provider, "configured": False}, indent=2))
+        return 0
+
+    if args.command == "run-ai-repaint-job":
+        payload = run_ai_repaint_job(
+            connection,
+            catalog_path=args.catalog,
+            job_id=args.job_id,
+            provider=args.provider,
+            input_path=args.input,
+            output_path=args.output,
+            prompt=args.prompt,
+            api_key=args.api_key,
+            origin_path=args.origin_path,
+            aspect_ratio=args.aspect_ratio,
+            image_size=args.image_size,
+            temperature=args.temperature,
+        )
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if args.command == "ai-repaint":
+        if args.provider == "mock":
+            payload = run_mock_repaint(
+                input_path=args.input,
+                output_path=args.output,
+                prompt=args.prompt,
+            )
+        else:
+            payload = run_nanobanana_repaint(
+                input_path=args.input,
+                output_path=args.output,
+                prompt=args.prompt,
+                api_key=args.api_key,
+                model=args.model,
+                aspect_ratio=args.aspect_ratio,
+                image_size=args.image_size,
+            )
+        print(json.dumps(asdict(payload), indent=2))
+        return 0
+
+    if args.command == "init-catalog":
+        set_catalog_path(connection, catalog.root)
+        print(f"initialized {catalog.root}")
+        return 0
 
     if args.command == "scan-raw":
         aggregate = {"indexed": 0, "skipped": 0, "unchanged": 0, "forced": int(args.force)}

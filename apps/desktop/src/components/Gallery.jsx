@@ -135,7 +135,7 @@ function MenuItem({ icon: Icon, label, shortcut, onClick, children }) {
           <ChevronRight className="h-3 w-3 text-muted2" />
         </button>
         {subOpen && (
-          <div className="absolute left-full top-0 z-50 ml-1 min-w-[160px] rounded-lg border border-border/60 bg-chrome py-1 shadow-xl">
+          <div className="absolute left-full top-0 z-50 ml-1 min-w-[160px] rounded-md border border-border/60 bg-chrome py-1 shadow-xl">
             {children}
           </div>
         )}
@@ -199,7 +199,7 @@ function ContextMenu({ x, y, item, collections, activeCollectionId, onAddTo, onR
   return createPortal(
     <div
       ref={(el) => { ref.current = el; menuRef.current = el; }}
-      className="fixed z-[12000] min-w-[200px] rounded-lg border border-border/60 bg-chrome py-1 shadow-xl"
+      className="fixed z-[12000] min-w-[200px] rounded-md border border-border/60 bg-chrome py-1 shadow-xl"
       style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
     >
       <MenuItem icon={Pencil} label="Edit…" shortcut="E" onClick={() => { onEdit?.(item.export_path); onClose(); }} />
@@ -656,7 +656,7 @@ export default function Gallery({
   if (!items.length) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-border bg-chrome/50">
+        <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-dashed border-border bg-chrome/50">
           <Images className="h-6 w-6 text-muted2" />
         </div>
         <div className="text-[13px] text-muted">No assets in this view</div>

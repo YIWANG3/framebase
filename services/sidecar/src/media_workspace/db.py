@@ -11,7 +11,7 @@ from .models import ExportCandidate, MatchDecision, RawMetadata
 from .schema import SCHEMA_STATEMENTS
 
 RESOLVER_VERSION = "reverse_lookup_v3_embedded_metadata"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -69,6 +69,37 @@ def set_catalog_path(connection: sqlite3.Connection, catalog_path: Path) -> None
 
 def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True)
+
+
+def get_app_setting(connection: sqlite3.Connection, setting_key: str) -> object | None:
+    row = connection.execute(
+        "SELECT value_json FROM app_settings WHERE setting_key = ?",
+        (setting_key,),
+    ).fetchone()
+    if row is None:
+        return None
+    return json.loads(row["value_json"] or "null")
+
+
+def set_app_setting(connection: sqlite3.Connection, setting_key: str, value: object, commit: bool = True) -> None:
+    connection.execute(
+        """
+        INSERT INTO app_settings (setting_key, value_json)
+        VALUES (?, ?)
+        ON CONFLICT(setting_key) DO UPDATE SET
+            value_json = excluded.value_json,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (setting_key, _json(value)),
+    )
+    if commit:
+        connection.commit()
+
+
+def delete_app_setting(connection: sqlite3.Connection, setting_key: str, commit: bool = True) -> None:
+    connection.execute("DELETE FROM app_settings WHERE setting_key = ?", (setting_key,))
+    if commit:
+        connection.commit()
 
 
 def _file_id(asset_id: str, path: str) -> str:

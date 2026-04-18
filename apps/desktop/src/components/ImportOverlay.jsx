@@ -8,7 +8,7 @@ export default function ImportOverlay({ overlay }) {
           <div className="mt-1 text-[13px] font-medium leading-snug text-text">{overlay.title}</div>
         </div>
         {overlay.percent ? (
-          <div className="shrink-0 rounded bg-accentSoft px-2 py-0.5 text-[12px] font-medium tabular-nums text-accent">{overlay.percent}</div>
+          <div className="shrink-0 rounded-full bg-accentSoft px-2 py-0.5 text-[12px] font-medium tabular-nums text-accent">{overlay.percent}</div>
         ) : null}
       </div>
       <div className="mt-2 text-[12px] text-muted">{overlay.status}</div>
