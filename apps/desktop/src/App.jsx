@@ -24,8 +24,8 @@ export default function App() {
   const [editorItem, setEditorItem] = useState(null);
   const [proofMode, setProofMode] = useState(false);
   const [layoutItems, setLayoutItems] = useState([]);
-  const [selectedExportPaths, setSelectedExportPaths] = useState([]);
-  const [selectionAnchorPath, setSelectionAnchorPath] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectionAnchorId, setSelectionAnchorId] = useState(null);
   const resizeSidebar = usePaneResize(workspace.setSidebarWidth, 200, 360);
   const resizeInspector = usePaneResize((value) => workspace.setInspectorWidth(-value), -420, -240);
   const currentItems = useMemo(
@@ -35,22 +35,16 @@ export default function App() {
         : workspace.filteredItems.filter((item) => item.resource_role === "primary" || !item.resource_set_id),
     [workspace.filteredItems, versionMode],
   );
-  const orderedPaths = useMemo(() => currentItems.map((item) => item.export_path), [currentItems]);
-  const itemByExportPath = useMemo(
-    () => new Map(currentItems.map((item) => [item.export_path, item])),
+  const orderedIds = useMemo(() => currentItems.map((item) => item.asset_id), [currentItems]);
+  const itemById = useMemo(
+    () => new Map(currentItems.map((item) => [item.asset_id, item])),
     [currentItems],
   );
-  const selectedPathSet = useMemo(() => new Set(selectedExportPaths), [selectedExportPaths]);
-  const selectedAssetIds = useMemo(
-    () =>
-      selectedExportPaths
-        .map((path) => itemByExportPath.get(path)?.asset_id)
-        .filter((assetId) => assetId != null),
-    [selectedExportPaths, itemByExportPath],
-  );
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedAssetIds = selectedIds;
   const selectedIndex = useMemo(
-    () => currentItems.findIndex((item) => item.export_path === workspace.selectedExportPath),
-    [currentItems, workspace.selectedExportPath],
+    () => currentItems.findIndex((item) => item.asset_id === workspace.selectedAssetId),
+    [currentItems, workspace.selectedAssetId],
   );
 
   const layoutStyle = {
@@ -62,121 +56,120 @@ export default function App() {
     gridTemplateRows: "minmax(0, 1fr)",
   };
 
-  function commitSelection(nextPaths, primaryPath, anchorPath = primaryPath) {
+  function commitSelection(nextIds, primaryId, anchorId = primaryId) {
     const deduped = [];
     const seen = new Set();
-    for (const path of nextPaths) {
-      if (!path || seen.has(path) || !itemByExportPath.has(path)) continue;
-      seen.add(path);
-      deduped.push(path);
+    for (const id of nextIds) {
+      if (!id || seen.has(id) || !itemById.has(id)) continue;
+      seen.add(id);
+      deduped.push(id);
     }
-    const nextPrimary = primaryPath && itemByExportPath.has(primaryPath) ? primaryPath : deduped[0] || null;
-    setSelectedExportPaths(deduped);
-    setSelectionAnchorPath(anchorPath && itemByExportPath.has(anchorPath) ? anchorPath : nextPrimary);
-    workspace.setSelectedExportPath(nextPrimary);
+    const nextPrimary = primaryId && itemById.has(primaryId) ? primaryId : deduped[0] || null;
+    setSelectedIds(deduped);
+    setSelectionAnchorId(anchorId && itemById.has(anchorId) ? anchorId : nextPrimary);
+    workspace.setSelectedAssetId(nextPrimary);
   }
 
-  function selectSingle(path) {
-    commitSelection(path ? [path] : [], path, path);
+  function selectSingle(id) {
+    commitSelection(id ? [id] : [], id, id);
   }
 
-  function toggleSelection(path) {
-    if (!path) return;
-    if (selectedPathSet.has(path)) {
-      const nextPaths = selectedExportPaths.filter((itemPath) => itemPath !== path);
+  function toggleSelection(id) {
+    if (!id) return;
+    if (selectedIdSet.has(id)) {
+      const nextIds = selectedIds.filter((existingId) => existingId !== id);
       const nextPrimary =
-        workspace.selectedExportPath === path ? nextPaths[nextPaths.length - 1] || null : workspace.selectedExportPath;
-      commitSelection(nextPaths, nextPrimary, selectionAnchorPath === path ? nextPrimary : selectionAnchorPath);
+        workspace.selectedAssetId === id ? nextIds[nextIds.length - 1] || null : workspace.selectedAssetId;
+      commitSelection(nextIds, nextPrimary, selectionAnchorId === id ? nextPrimary : selectionAnchorId);
       return;
     }
-    commitSelection([...selectedExportPaths, path], path, selectionAnchorPath || path);
+    commitSelection([...selectedIds, id], id, selectionAnchorId || id);
   }
 
-  function selectRange(path, append = false) {
-    if (!path) return;
-    const anchor = selectionAnchorPath || workspace.selectedExportPath || path;
-    const anchorIndex = orderedPaths.indexOf(anchor);
-    const targetIndex = orderedPaths.indexOf(path);
+  function selectRange(id, append = false) {
+    if (!id) return;
+    const anchor = selectionAnchorId || workspace.selectedAssetId || id;
+    const anchorIndex = orderedIds.indexOf(anchor);
+    const targetIndex = orderedIds.indexOf(id);
     if (anchorIndex < 0 || targetIndex < 0) {
-      selectSingle(path);
+      selectSingle(id);
       return;
     }
     const start = Math.min(anchorIndex, targetIndex);
     const end = Math.max(anchorIndex, targetIndex);
-    const rangePaths = orderedPaths.slice(start, end + 1);
-    const nextPaths = append ? [...selectedExportPaths, ...rangePaths] : rangePaths;
-    commitSelection(nextPaths, path, anchor);
+    const rangeIds = orderedIds.slice(start, end + 1);
+    const nextIds = append ? [...selectedIds, ...rangeIds] : rangeIds;
+    commitSelection(nextIds, id, anchor);
   }
 
-  function handleItemSelect(path, event) {
+  function handleItemSelect(assetId, event) {
     if (!event) {
-      selectSingle(path);
+      selectSingle(assetId);
       return;
     }
     const isToggle = event.metaKey || event.ctrlKey;
     if (event.shiftKey) {
-      selectRange(path, isToggle);
+      selectRange(assetId, isToggle);
       return;
     }
     if (isToggle) {
-      toggleSelection(path);
+      toggleSelection(assetId);
       return;
     }
-    selectSingle(path);
+    selectSingle(assetId);
   }
 
-  function openLightboxForPath(path) {
-    if (!path) return;
-    selectSingle(path);
+  function openLightboxForItem(assetId) {
+    if (!assetId) return;
+    selectSingle(assetId);
     setProofMode(false);
     setLightboxOpen(true);
   }
 
-  function handleContextSelect(path) {
-    if (selectedPathSet.has(path)) {
-      workspace.setSelectedExportPath(path);
+  function handleContextSelect(assetId) {
+    if (selectedIdSet.has(assetId)) {
+      workspace.setSelectedAssetId(assetId);
       return;
     }
-    selectSingle(path);
+    selectSingle(assetId);
   }
 
-  function handleSelectionGroup(paths, primaryPath, anchorPath = primaryPath) {
-    commitSelection(paths, primaryPath, anchorPath);
+  function handleSelectionGroup(ids, primaryId, anchorId = primaryId) {
+    commitSelection(ids, primaryId, anchorId);
   }
 
   function clearSelection() {
-    setSelectedExportPaths([]);
-    setSelectionAnchorPath(null);
-    workspace.setSelectedExportPath(null);
+    setSelectedIds([]);
+    setSelectionAnchorId(null);
+    workspace.setSelectedAssetId(null);
   }
 
   function applyRating(nextRating) {
     const targetIds = selectedAssetIds.length
       ? selectedAssetIds
-      : [itemByExportPath.get(workspace.selectedExportPath)?.asset_id].filter((assetId) => assetId != null);
+      : [workspace.selectedAssetId].filter((id) => id != null);
     if (!targetIds.length) return;
     void workspace.setAssetRating(targetIds, nextRating);
   }
 
-  function prepareDragSelection(path) {
-    if (selectedPathSet.has(path) && selectedAssetIds.length > 1) {
-      workspace.setSelectedExportPath(path);
-      return {
-        assetIds: selectedAssetIds,
-        exportPaths: selectedExportPaths,
-      };
+  function prepareDragSelection(assetId) {
+    if (selectedIdSet.has(assetId) && selectedAssetIds.length > 1) {
+      workspace.setSelectedAssetId(assetId);
+      const exportPaths = selectedAssetIds.map((id) => itemById.get(id)?.export_path).filter(Boolean);
+      return { assetIds: selectedAssetIds, exportPaths };
     }
-    selectSingle(path);
+    selectSingle(assetId);
+    const item = itemById.get(assetId);
     return {
-      assetIds: [itemByExportPath.get(path)?.asset_id].filter((assetId) => assetId != null),
-      exportPaths: [path],
+      assetIds: [assetId].filter(Boolean),
+      exportPaths: [item?.export_path].filter(Boolean),
     };
   }
 
   function selectByIndex(index) {
     const next = currentItems[index];
     if (!next) return;
-    selectSingle(next.export_path);
+    selectSingle(next.asset_id);
   }
 
   function moveSelection(offset) {
@@ -192,12 +185,12 @@ export default function App() {
 
   function selectByDirection(direction) {
     if (!currentItems.length) return;
-    if (!workspace.selectedExportPath) {
+    if (!workspace.selectedAssetId) {
       selectByIndex(0);
       return;
     }
 
-    const current = layoutItems.find((item) => item.exportPath === workspace.selectedExportPath);
+    const current = layoutItems.find((item) => item.assetId === workspace.selectedAssetId);
     if (!current) {
       moveSelection(direction === "left" || direction === "up" ? -1 : 1);
       return;
@@ -207,7 +200,6 @@ export default function App() {
     const curCenterX = current.left + current.width / 2;
     const curCenterY = current.top + current.height / 2;
 
-    // Helper: group layout items by a positional property with tolerance
     function groupByPosition(items, getPos, tolerance) {
       const groups = [];
       for (const item of items) {
@@ -223,7 +215,6 @@ export default function App() {
       return groups;
     }
 
-    // --- Grid: left/right = ±1, up/down = ±columnCount ---
     if (displayMode === "grid" || displayMode === "tiles") {
       if (direction === "left" || direction === "right") {
         moveSelection(isForward ? 1 : -1);
@@ -234,14 +225,13 @@ export default function App() {
       return;
     }
 
-    // --- Justified: left/right = sequential, up/down = closest X in adjacent row ---
     if (displayMode === "justified") {
       if (direction === "left" || direction === "right") {
         moveSelection(isForward ? 1 : -1);
         return;
       }
       const rows = groupByPosition(layoutItems, (item) => item.top, 8);
-      const curRowIdx = rows.findIndex((r) => r.items.some((item) => item.exportPath === current.exportPath));
+      const curRowIdx = rows.findIndex((r) => r.items.some((item) => item.assetId === current.assetId));
       const targetRowIdx = isForward ? curRowIdx + 1 : curRowIdx - 1;
       if (targetRowIdx < 0 || targetRowIdx >= rows.length) return;
       const targetRow = rows[targetRowIdx].items;
@@ -251,17 +241,16 @@ export default function App() {
         const dist = Math.abs(item.left + item.width / 2 - curCenterX);
         if (dist < bestDist) { bestDist = dist; best = item; }
       }
-      workspace.setSelectedExportPath(best.exportPath);
+      selectSingle(best.assetId);
       return;
     }
 
-    // --- Waterfall: left/right = adjacent column closest Y, up/down = same column ---
     if (displayMode === "waterfall") {
       const columns = groupByPosition(layoutItems, (item) => item.left, 4);
       for (const col of columns) col.items.sort((a, b) => a.top - b.top);
-      const curColIdx = columns.findIndex((c) => c.items.some((item) => item.exportPath === current.exportPath));
+      const curColIdx = columns.findIndex((c) => c.items.some((item) => item.assetId === current.assetId));
       const curCol = columns[curColIdx];
-      const curItemInColIdx = curCol.items.findIndex((item) => item.exportPath === current.exportPath);
+      const curItemInColIdx = curCol.items.findIndex((item) => item.assetId === current.assetId);
 
       if (direction === "left" || direction === "right") {
         const targetColIdx = isForward ? curColIdx + 1 : curColIdx - 1;
@@ -273,11 +262,11 @@ export default function App() {
           const dist = Math.abs(item.top + item.height / 2 - curCenterY);
           if (dist < bestDist) { bestDist = dist; best = item; }
         }
-        workspace.setSelectedExportPath(best.exportPath);
+        selectSingle(best.assetId);
       } else {
         const targetIdx = isForward ? curItemInColIdx + 1 : curItemInColIdx - 1;
         if (targetIdx < 0 || targetIdx >= curCol.items.length) return;
-        workspace.setSelectedExportPath(curCol.items[targetIdx].exportPath);
+        selectSingle(curCol.items[targetIdx].assetId);
       }
       return;
     }
@@ -286,43 +275,43 @@ export default function App() {
   function openEditor(target) {
     const nextItem =
       typeof target === "string"
-        ? itemByExportPath.get(target)
-        : target?.export_path
-          ? itemByExportPath.get(target.export_path) || target
-          : itemByExportPath.get(workspace.selectedExportPath);
+        ? itemById.get(target)
+        : target?.asset_id
+          ? itemById.get(target.asset_id) || target
+          : itemById.get(workspace.selectedAssetId);
     if (!nextItem) return;
     setEditorItem(nextItem);
   }
 
   useEffect(() => {
-    if (!workspace.selectedExportPath) {
+    if (!workspace.selectedAssetId) {
       setLightboxOpen(false);
       setProofMode(false);
       setEditorItem(null);
     }
-  }, [workspace.selectedExportPath]);
+  }, [workspace.selectedAssetId]);
 
   useEffect(() => {
-    const validPaths = new Set(orderedPaths);
-    setSelectedExportPaths((current) => {
-      const next = current.filter((path) => validPaths.has(path));
-      const primaryPath =
-        workspace.selectedExportPath && validPaths.has(workspace.selectedExportPath) ? workspace.selectedExportPath : null;
-      if (primaryPath) {
-        if (!next.length) return [primaryPath];
-        if (!next.includes(primaryPath)) return [primaryPath];
+    const validIds = new Set(orderedIds);
+    setSelectedIds((current) => {
+      const next = current.filter((id) => validIds.has(id));
+      const primaryId =
+        workspace.selectedAssetId && validIds.has(workspace.selectedAssetId) ? workspace.selectedAssetId : null;
+      if (primaryId) {
+        if (!next.length) return [primaryId];
+        if (!next.includes(primaryId)) return [primaryId];
         return next;
       }
       return next;
     });
-    setSelectionAnchorPath((current) => {
-      if (current && validPaths.has(current)) return current;
-      if (workspace.selectedExportPath && validPaths.has(workspace.selectedExportPath)) {
-        return workspace.selectedExportPath;
+    setSelectionAnchorId((current) => {
+      if (current && validIds.has(current)) return current;
+      if (workspace.selectedAssetId && validIds.has(workspace.selectedAssetId)) {
+        return workspace.selectedAssetId;
       }
-      return orderedPaths[0] || null;
+      return orderedIds[0] || null;
     });
-  }, [orderedPaths, workspace.selectedExportPath]);
+  }, [orderedIds, workspace.selectedAssetId]);
 
   useEffect(() => {
     function shouldIgnoreKey(event) {
@@ -338,13 +327,13 @@ export default function App() {
       if (shouldIgnoreKey(event)) return;
 
       if (event.code === "Space") {
-        if (!workspace.selectedExportPath) return;
+        if (!workspace.selectedAssetId) return;
         event.preventDefault();
         setLightboxOpen((current) => !current);
         return;
       }
 
-      if (/^[0-5]$/.test(event.key) && (selectedAssetIds.length || workspace.selectedExportPath)) {
+      if (/^[0-5]$/.test(event.key) && (selectedAssetIds.length || workspace.selectedAssetId)) {
         event.preventDefault();
         applyRating(Number(event.key));
         return;
@@ -381,7 +370,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentItems, displayMode, editorItem, layoutItems, lightboxOpen, openEditor, proofMode, selectedIndex, workspace.selectedExportPath, selectedAssetIds]);
+  }, [currentItems, displayMode, editorItem, layoutItems, lightboxOpen, openEditor, proofMode, selectedIndex, workspace.selectedAssetId, selectedAssetIds]);
 
   return (
     <div className="noise-overlay h-full overflow-hidden bg-app text-text">
@@ -452,10 +441,10 @@ export default function App() {
           <div className="min-h-0 flex-1 overflow-hidden">
               <Gallery
                 items={currentItems}
-                selectedExportPath={workspace.selectedExportPath}
-                selectedExportPaths={selectedExportPaths}
+                selectedAssetId={workspace.selectedAssetId}
+                selectedAssetIds={selectedAssetIds}
                 onSelect={handleItemSelect}
-                onOpen={openLightboxForPath}
+                onOpen={openLightboxForItem}
                 onSelectMany={handleSelectionGroup}
                 onContextSelect={handleContextSelect}
                 onClearSelection={clearSelection}
@@ -471,7 +460,6 @@ export default function App() {
                 totalCount={Number(workspace.summary?.export_assets ?? 0)}
                 collections={workspace.collections}
                 activeCollectionId={workspace.activeCollectionId}
-                selectedAssetIds={selectedAssetIds}
                 onAddToCollection={workspace.addToCollection}
                 onRemoveFromCollection={workspace.removeFromCollection}
                 onDeleteFromCatalog={workspace.deleteExportAssets}

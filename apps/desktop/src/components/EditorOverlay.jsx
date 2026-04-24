@@ -1568,16 +1568,18 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
                   <FooterButton icon={Check} label="Apply" onClick={handleApply} disabled={loadState !== "ready"} primary />
                 </div>
               </>
-            ) : tool === "ai" ? (
-              <AiRepaintPanel sourcePath={sourcePath} sourceLabel={sourceLabel} onCompareChange={setCompareState} compareState={compareState} />
-            ) : (
+            ) : tool !== "ai" ? (
               <div className="px-4 py-4">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted2">Other Tools</div>
                 <div className="mt-3 rounded-lg bg-app px-3 py-3 text-[12px] leading-6 text-muted">
                   Crop is the active tool. Other tools stay grouped here until the crop workflow feels right.
                 </div>
               </div>
-            )}
+            ) : null}
+            {/* Always mounted so data loads when editor opens, hidden when not active */}
+            <div className={tool === "ai" ? undefined : "hidden"}>
+              <AiRepaintPanel sourcePath={sourcePath} sourceLabel={sourceLabel} onCompareChange={setCompareState} compareState={compareState} onRepaintComplete={onSaveComplete} />
+            </div>
           </div>
 
           <div

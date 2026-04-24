@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, Star } from "lucide-react";
+import { ChevronRight, Star, Copy } from "lucide-react";
 import { fileName, escapePathLabel, formatBytes, formatTimestamp, localFileUrl, formatShutterSpeed, formatAperture, formatFocalLength, formatISO } from "../utils/format";
 
 function StarRating({ value = 0, onChange }) {
@@ -184,6 +184,28 @@ export default function Inspector({ detail, onRatingChange }) {
           {gps ? (
             <Section title="Location">
               <DetailRow label="GPS">{gps}</DetailRow>
+            </Section>
+          ) : null}
+
+          {detail.duplicates?.length > 0 ? (
+            <Section title="Duplicates">
+              <div className="mt-1 space-y-1.5">
+                {detail.duplicates.map((dup) => (
+                  <button
+                    key={dup.asset_id}
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-hover"
+                    onClick={() => void window.mediaWorkspace?.revealPath?.(dup.export_path)}
+                    title="Reveal in Finder"
+                  >
+                    <Copy className="h-3 w-3 shrink-0 text-muted2" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12px] text-text">{dup.stem}</div>
+                      <div className="truncate text-[10px] text-muted">{escapePathLabel(dup.export_path)}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </Section>
           ) : null}
         </div>

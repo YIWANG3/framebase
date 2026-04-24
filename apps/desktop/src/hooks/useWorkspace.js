@@ -20,7 +20,7 @@ export default function useWorkspace() {
   const [status, setStatus] = useState("all");
   const [sort, setSort] = useState("name-asc");
   const [query, setQuery] = useState("");
-  const [selectedExportPath, setSelectedExportPath] = useState(null);
+  const [selectedAssetId, setSelectedAssetId] = useState(null);
   const [browserLoading, setBrowserLoading] = useState(false);
   const [browserReady, setBrowserReady] = useState(false);
   const [browserLoadingMore, setBrowserLoadingMore] = useState(false);
@@ -164,12 +164,12 @@ export default function useWorkspace() {
     return { visible: false, title: "", status: "", percent: "", notes: [], phases: [] };
   }, [importTask, enrichmentTask, previewTask, pendingImport]);
 
-  async function loadDetail(exportPath) {
-    if (!exportPath) {
+  async function loadDetail(assetId) {
+    if (!assetId) {
       setDetail(null);
       return;
     }
-    const payload = await window.mediaWorkspace.getAssetDetail(exportPath);
+    const payload = await window.mediaWorkspace.getAssetDetailById(assetId);
     setDetail(payload);
   }
 
@@ -207,13 +207,13 @@ export default function useWorkspace() {
         setItems((current) => [...current, ...payload]);
       } else {
         setItems(payload);
-        const firstPath = payload[0]?.export_path || null;
-        const nextSelectedPath =
-          selectedExportPath && payload.some((item) => item.export_path === selectedExportPath)
-            ? selectedExportPath
-            : firstPath;
-        setSelectedExportPath(nextSelectedPath);
-        await loadDetail(nextSelectedPath || null);
+        const firstId = payload[0]?.asset_id || null;
+        const nextSelectedId =
+          selectedAssetId && payload.some((item) => item.asset_id === selectedAssetId)
+            ? selectedAssetId
+            : firstId;
+        setSelectedAssetId(nextSelectedId);
+        await loadDetail(nextSelectedId || null);
       }
       setBrowserReady(true);
     } finally {
@@ -277,11 +277,12 @@ export default function useWorkspace() {
     const targetIds = [...new Set((assetIds || []).filter(Boolean))];
     if (!targetIds.length) return;
     await window.mediaWorkspace.deleteExportAssets(targetIds);
-    if (selectedExportPath && items.some((item) => targetIds.includes(item.asset_id) && item.export_path === selectedExportPath)) {
-      setSelectedExportPath(null);
+    const deletedSet = new Set(targetIds);
+    setItems((current) => current.filter((item) => !deletedSet.has(item.asset_id)));
+    if (selectedAssetId && deletedSet.has(selectedAssetId)) {
+      setSelectedAssetId(null);
       setDetail(null);
     }
-    await refreshAll({ nextStatus: status, collectionId: activeCollectionId });
   }
 
   async function setAssetRating(assetIds, rating) {
@@ -440,12 +441,12 @@ export default function useWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (!selectedExportPath) {
+    if (!selectedAssetId) {
       setDetail(null);
       return;
     }
-    void loadDetail(selectedExportPath);
-  }, [selectedExportPath]);
+    void loadDetail(selectedAssetId);
+  }, [selectedAssetId]);
 
   useEffect(() => {
     if (!window.mediaWorkspace.onMenuAction) return undefined;
@@ -569,8 +570,8 @@ export default function useWorkspace() {
     summary,
     filteredItems,
     detail,
-    selectedExportPath,
-    setSelectedExportPath,
+    selectedAssetId,
+    setSelectedAssetId,
     status,
     setStatus,
     sort,

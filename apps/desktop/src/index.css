@@ -179,3 +179,22 @@ select {
   background-position: right 8px center;
   padding-right: 22px !important;
 }
+
+/* AI Generate button — animated gradient while running */
+.ai-generating-btn {
+  background-size: 200% 100%;
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--accent-color)) 0%,
+    rgb(240 200 130) 25%,
+    rgb(var(--accent-color)) 50%,
+    rgb(240 200 130) 75%,
+    rgb(var(--accent-color)) 100%
+  );
+  animation: ai-shimmer 2s linear infinite;
+}
+
+@keyframes ai-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

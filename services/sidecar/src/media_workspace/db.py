@@ -180,41 +180,21 @@ def create_resource_set(
     connection: sqlite3.Connection,
     primary_asset_id: str,
     *,
-    raw_asset_id: str | None = None,
     commit: bool = True,
 ) -> str:
     existing = get_resource_set_for_asset(connection, primary_asset_id)
     if existing:
-        if raw_asset_id and not existing["raw_asset_id"]:
-            connection.execute(
-                "UPDATE resource_sets SET raw_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE set_id = ?",
-                (raw_asset_id, existing["set_id"]),
-            )
-            add_asset_to_resource_set(
-                connection,
-                existing["set_id"],
-                raw_asset_id,
-                role="raw",
-                version_kind="raw",
-                parent_asset_id=None,
-                sort_order=0,
-                commit=False,
-            )
-            if commit:
-                connection.commit()
         return str(existing["set_id"])
 
     set_id = _resource_set_id()
     connection.execute(
         """
-        INSERT INTO resource_sets (set_id, primary_asset_id, raw_asset_id)
-        VALUES (?, ?, ?)
+        INSERT INTO resource_sets (set_id, primary_asset_id)
+        VALUES (?, ?)
         """,
-        (set_id, primary_asset_id, raw_asset_id),
+        (set_id, primary_asset_id),
     )
     add_asset_to_resource_set(connection, set_id, primary_asset_id, role="primary", version_kind="main", parent_asset_id=None, sort_order=1, commit=False)
-    if raw_asset_id and raw_asset_id != primary_asset_id:
-        add_asset_to_resource_set(connection, set_id, raw_asset_id, role="raw", version_kind="raw", parent_asset_id=None, sort_order=0, commit=False)
     if commit:
         connection.commit()
     return set_id
@@ -225,7 +205,6 @@ def attach_asset_to_resource_set(
     asset_id: str,
     *,
     origin_asset_id: str | None = None,
-    raw_asset_id: str | None = None,
     version_kind: str = "version",
     commit: bool = True,
 ) -> str:
@@ -233,48 +212,27 @@ def attach_asset_to_resource_set(
     if existing:
         return str(existing["set_id"])
 
-    target_set = None
+    # Has explicit origin (e.g. AI repaint, crop) → join origin's set
     if origin_asset_id:
         origin_set = get_resource_set_for_asset(connection, origin_asset_id)
         if origin_set:
             target_set = str(origin_set["set_id"])
-    if target_set is None and raw_asset_id:
-        raw_set = get_resource_set_for_asset(connection, raw_asset_id)
-        if raw_set:
-            target_set = str(raw_set["set_id"])
-
-    if target_set is None and origin_asset_id:
-        target_set = create_resource_set(
-            connection,
-            origin_asset_id,
-            raw_asset_id=raw_asset_id,
-            commit=False,
+        else:
+            # Origin has no set yet → create one with origin as primary
+            target_set = create_resource_set(
+                connection, origin_asset_id, commit=False,
+            )
+        add_asset_to_resource_set(
+            connection, target_set, asset_id,
+            role="version", version_kind=version_kind,
+            parent_asset_id=origin_asset_id, commit=False,
         )
-
-    if target_set is None:
-        target_set = create_resource_set(connection, asset_id, raw_asset_id=raw_asset_id, commit=False)
         if commit:
             connection.commit()
         return target_set
 
-    if raw_asset_id:
-        set_row = get_resource_set(connection, target_set)
-        if set_row is not None and not set_row["raw_asset_id"]:
-            connection.execute(
-                "UPDATE resource_sets SET raw_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE set_id = ?",
-                (raw_asset_id, target_set),
-            )
-            add_asset_to_resource_set(connection, target_set, raw_asset_id, role="raw", version_kind="raw", parent_asset_id=None, sort_order=0, commit=False)
-
-    add_asset_to_resource_set(
-        connection,
-        target_set,
-        asset_id,
-        role="version",
-        version_kind=version_kind,
-        parent_asset_id=origin_asset_id,
-        commit=False,
-    )
+    # Independent import with no origin → create own set
+    target_set = create_resource_set(connection, asset_id, commit=False)
     if commit:
         connection.commit()
     return target_set
@@ -336,12 +294,73 @@ def list_singleton_primary_resource_sets(connection: sqlite3.Connection) -> list
     ).fetchall()
 
 
+def list_incorrectly_merged_resource_sets(connection: sqlite3.Connection) -> list[dict]:
+    """Find resource sets containing multiple independent exports from different directories.
+
+    Returns a list of dicts with set_id, and a list of member info.
+    Sets where all members share the same parent directory are NOT returned.
+    """
+    # Find sets with 2+ export members
+    candidate_sets = connection.execute(
+        """
+        SELECT rsi.set_id, COUNT(*) AS export_count
+        FROM resource_set_items AS rsi
+        JOIN assets ON assets.asset_id = rsi.asset_id AND assets.asset_type = 'export'
+        GROUP BY rsi.set_id
+        HAVING export_count > 1
+        """
+    ).fetchall()
+
+    results = []
+    for row in candidate_sets:
+        set_id = row["set_id"]
+        members = connection.execute(
+            """
+            SELECT rsi.asset_id, assets.canonical_path, rsi.role, rsi.version_kind, rsi.parent_asset_id
+            FROM resource_set_items AS rsi
+            JOIN assets ON assets.asset_id = rsi.asset_id AND assets.asset_type = 'export'
+            WHERE rsi.set_id = ?
+            ORDER BY rsi.sort_order
+            """,
+            (set_id,),
+        ).fetchall()
+
+        # Check: are there members WITHOUT a parent_asset_id (independent imports)
+        # from DIFFERENT directories?
+        independent_members = [m for m in members if not m["parent_asset_id"]]
+        if len(independent_members) < 2:
+            continue
+
+        dirs = set()
+        for m in independent_members:
+            parent_dir = str(Path(m["canonical_path"]).parent)
+            dirs.add(parent_dir)
+
+        if len(dirs) < 2:
+            continue
+
+        results.append({
+            "set_id": set_id,
+            "members": [
+                {
+                    "asset_id": m["asset_id"],
+                    "canonical_path": m["canonical_path"],
+                    "role": m["role"],
+                    "version_kind": m["version_kind"],
+                    "parent_asset_id": m["parent_asset_id"],
+                }
+                for m in members
+            ],
+        })
+
+    return results
+
+
 def reassign_asset_to_resource_set(
     connection: sqlite3.Connection,
     asset_id: str,
     *,
     origin_asset_id: str,
-    raw_asset_id: str | None = None,
     version_kind: str = "derived",
     commit: bool = True,
 ) -> str:
@@ -362,7 +381,6 @@ def reassign_asset_to_resource_set(
         connection,
         asset_id,
         origin_asset_id=origin_asset_id,
-        raw_asset_id=raw_asset_id,
         version_kind=version_kind,
         commit=False,
     )
@@ -780,21 +798,6 @@ def upsert_registry(connection: sqlite3.Connection, decision: MatchDecision, com
             confidence=decision.score,
             confirmed_by="system" if decision.status == "auto_bound" else "user",
         )
-        attach_asset_to_resource_set(
-            connection,
-            decision.export_asset_id,
-            raw_asset_id=decision.raw_asset_id,
-            version_kind="import",
-            commit=False,
-        )
-    else:
-        attach_asset_to_resource_set(
-            connection,
-            decision.export_asset_id,
-            raw_asset_id=None,
-            version_kind="import",
-            commit=False,
-        )
     if commit:
         connection.commit()
 
@@ -1125,9 +1128,9 @@ def list_export_assets(
             rs.raw_asset_id AS set_raw_asset_id,
             primary_assets.stem AS primary_stem,
             set_counts.set_item_count AS set_item_count
-        FROM assets
-        JOIN export_lookup_registry AS registry
-            ON registry.export_asset_id = assets.asset_id
+        FROM export_lookup_registry AS registry
+        JOIN assets
+            ON assets.asset_id = registry.export_asset_id
         LEFT JOIN assets AS raw_assets
             ON raw_assets.asset_id = registry.raw_asset_id
         LEFT JOIN resource_set_items AS rsi
@@ -1146,14 +1149,163 @@ def list_export_assets(
             ON preview_entries.asset_id = assets.asset_id
            AND preview_entries.kind = 'preview'
            AND preview_entries.status = 'ready'
-        WHERE assets.asset_type = 'export'
-          AND {status_clause}
+        WHERE {status_clause}
           {search_clause}
-        ORDER BY assets.stem, assets.canonical_path
+        ORDER BY assets.stem, registry.export_path
         LIMIT ? OFFSET ?
         """,
         params,
     ).fetchall()
+
+
+def get_duplicate_assets(connection: sqlite3.Connection, asset_id: str) -> list[sqlite3.Row]:
+    """Find other export assets with the same fingerprint (content duplicates)."""
+    row = connection.execute(
+        "SELECT fingerprint FROM assets WHERE asset_id = ?", (asset_id,)
+    ).fetchone()
+    if not row or not row["fingerprint"]:
+        return []
+    return connection.execute(
+        """
+        SELECT asset_id, canonical_path AS export_path, stem
+        FROM assets
+        WHERE fingerprint = ? AND asset_id != ? AND asset_type = 'export'
+        ORDER BY canonical_path
+        """,
+        (row["fingerprint"], asset_id),
+    ).fetchall()
+
+
+def split_shared_asset_ids(connection: sqlite3.Connection, commit: bool = True) -> int:
+    """Fix assets where multiple registry entries share one asset_id (old format without path).
+
+    For each duplicate group, the first entry keeps the original asset record;
+    additional entries get a new asset record with a path-aware stable ID.
+    """
+    from .metadata import stable_asset_id
+
+    dupes = connection.execute("""
+        SELECT export_asset_id, COUNT(*) AS cnt
+        FROM export_lookup_registry
+        GROUP BY export_asset_id
+        HAVING cnt > 1
+    """).fetchall()
+
+    split_count = 0
+    for dupe in dupes:
+        old_id = str(dupe["export_asset_id"])
+        entries = connection.execute("""
+            SELECT export_path, raw_asset_id, match_status, score,
+                   resolver_version, feature_vector_json, candidate_json, confirmed_at
+            FROM export_lookup_registry
+            WHERE export_asset_id = ?
+            ORDER BY export_path
+        """, (old_id,)).fetchall()
+
+        asset_row = connection.execute("""
+            SELECT * FROM assets WHERE asset_id = ?
+        """, (old_id,)).fetchone()
+        if not asset_row:
+            continue
+
+        # Keep first entry on original asset, split the rest
+        canonical_path = str(asset_row["canonical_path"])
+        for entry in entries:
+            entry_path = str(entry["export_path"])
+            if entry_path == canonical_path:
+                continue  # Keep original
+
+            new_id = stable_asset_id("export", str(asset_row["fingerprint"]), entry_path)
+            if new_id == old_id:
+                continue  # Would collide, skip
+
+            # Create new asset record
+            connection.execute("""
+                INSERT INTO assets (
+                    asset_id, asset_type, canonical_path, stem, normalized_stem, stem_key,
+                    extension, fingerprint, file_size, modified_time, metadata_json, app_rating
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(asset_id) DO NOTHING
+            """, (
+                new_id,
+                asset_row["asset_type"],
+                entry_path,
+                asset_row["stem"],
+                asset_row["normalized_stem"],
+                asset_row["stem_key"],
+                asset_row["extension"],
+                asset_row["fingerprint"],
+                asset_row["file_size"],
+                asset_row["modified_time"],
+                asset_row["metadata_json"],
+                asset_row["app_rating"],
+            ))
+
+            # Update registry to point to new asset
+            connection.execute("""
+                UPDATE export_lookup_registry
+                SET export_asset_id = ?
+                WHERE export_path = ? AND export_asset_id = ?
+            """, (new_id, entry_path, old_id))
+
+            # Update asset_files
+            connection.execute("""
+                UPDATE asset_files SET asset_id = ?, file_id = ?
+                WHERE asset_id = ? AND path = ?
+            """, (new_id, _file_id(new_id, entry_path), old_id, entry_path))
+
+            # Update resource_set_items: create new membership for the split asset
+            rsi = connection.execute("""
+                SELECT set_id, role, version_kind, parent_asset_id, sort_order
+                FROM resource_set_items WHERE asset_id = ?
+            """, (old_id,)).fetchone()
+            if rsi:
+                parent = str(rsi["parent_asset_id"]) if rsi["parent_asset_id"] else None
+                attach_asset_to_resource_set(
+                    connection, new_id,
+                    origin_asset_id=parent,
+                    version_kind=str(rsi["version_kind"]),
+                    commit=False,
+                )
+
+            # Update collection_items
+            connection.execute("""
+                INSERT OR IGNORE INTO collection_items (collection_id, asset_id, added_at)
+                SELECT collection_id, ?, added_at
+                FROM collection_items WHERE asset_id = ?
+            """, (new_id, old_id))
+
+            # Share preview_entries (same preview file, different asset_id)
+            connection.execute("""
+                INSERT OR IGNORE INTO preview_entries (cache_key, asset_id, kind, relative_path, width, height, status)
+                SELECT ? || '_' || kind, ?, kind, relative_path, width, height, status
+                FROM preview_entries WHERE asset_id = ?
+            """, (new_id, new_id, old_id))
+
+            split_count += 1
+
+    if commit and split_count:
+        connection.commit()
+    return split_count
+
+
+def remove_raw_from_resource_sets(connection: sqlite3.Connection, commit: bool = True) -> int:
+    """Remove raw assets from resource sets — raw linkage is via registry, not sets."""
+    removed = connection.execute("""
+        DELETE FROM resource_set_items
+        WHERE asset_id IN (SELECT asset_id FROM assets WHERE asset_type = 'raw')
+    """).rowcount
+    if removed:
+        connection.execute("UPDATE resource_sets SET raw_asset_id = NULL WHERE raw_asset_id IS NOT NULL")
+        # Clean up empty sets
+        connection.execute("""
+            DELETE FROM resource_sets WHERE set_id NOT IN (
+                SELECT DISTINCT set_id FROM resource_set_items
+            )
+        """)
+    if commit and removed:
+        connection.commit()
+    return removed
 
 
 def get_export_asset_detail(connection: sqlite3.Connection, asset_id: str) -> sqlite3.Row | None:
@@ -1690,11 +1842,6 @@ def delete_export_asset_from_catalog(
     set_row = get_resource_set_for_asset(connection, asset_id)
     if set_row is not None:
         set_id = str(set_row["set_id"])
-        if str(set_row["raw_asset_id"]) == asset_id:
-            connection.execute(
-                "UPDATE resource_sets SET raw_asset_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE set_id = ?",
-                (set_id,),
-            )
         connection.execute(
             "DELETE FROM resource_set_items WHERE set_id = ? AND asset_id = ?",
             (set_id, asset_id),
@@ -1704,7 +1851,6 @@ def delete_export_asset_from_catalog(
             SELECT asset_id
             FROM resource_set_items
             WHERE set_id = ?
-              AND role != 'raw'
             ORDER BY sort_order, created_at, asset_id
             LIMIT 1
             """,

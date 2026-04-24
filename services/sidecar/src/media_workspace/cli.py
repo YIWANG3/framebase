@@ -9,7 +9,7 @@ from .benchmark import benchmark_dataset
 from .catalog import ensure_catalog
 from .config import Thresholds
 from .analysis import analyze_metadata_coverage
-from .ai_repaint import DEFAULT_GEMINI_MODEL, run_mock_repaint, run_nanobanana_repaint
+from .ai_repaint import DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_MODEL, OPENAI_PROVIDER, list_provider_models, run_mock_repaint, run_nanobanana_repaint, run_openai_repaint
 from .db import (
     attach_asset_to_resource_set,
     cleanup_orphan_export_assets,
@@ -19,7 +19,10 @@ from .db import (
     delete_app_setting,
     delete_export_asset_from_catalog,
     find_export_asset_ids_by_stem,
+    get_duplicate_assets,
     get_export_asset_detail,
+    remove_raw_from_resource_sets,
+    split_shared_asset_ids,
     get_export_asset_detail_by_path,
     get_app_setting,
     get_job,
@@ -282,10 +285,12 @@ def build_parser() -> argparse.ArgumentParser:
     delete_provider_token.add_argument("--provider", required=True)
 
     subparsers.add_parser("repair-resource-sets", parents=[common])
+    subparsers.add_parser("split-shared-assets", parents=[common])
 
     run_ai_repaint_job_parser = subparsers.add_parser("run-ai-repaint-job", parents=[common])
     run_ai_repaint_job_parser.add_argument("--job-id", required=True)
-    run_ai_repaint_job_parser.add_argument("--provider", choices=["nanobanana", "mock"], default="nanobanana")
+    run_ai_repaint_job_parser.add_argument("--provider", choices=["nanobanana", "openai", "jimeng", "mock"], default="nanobanana")
+    run_ai_repaint_job_parser.add_argument("--model")
     run_ai_repaint_job_parser.add_argument("--input", type=Path, required=True)
     run_ai_repaint_job_parser.add_argument("--output", type=Path, required=True)
     run_ai_repaint_job_parser.add_argument("--prompt", required=True)
@@ -298,8 +303,12 @@ def build_parser() -> argparse.ArgumentParser:
     summary_parser = subparsers.add_parser("summary", parents=[common])
     summary_parser.add_argument("--json", action="store_true")
 
+    list_models_parser = subparsers.add_parser("list-ai-models", parents=[common])
+    list_models_parser.add_argument("--provider", choices=["nanobanana", "openai", "jimeng"], default="nanobanana")
+    list_models_parser.add_argument("--api-key")
+
     repaint = subparsers.add_parser("ai-repaint", parents=[common])
-    repaint.add_argument("--provider", choices=["nanobanana", "mock"], default="nanobanana")
+    repaint.add_argument("--provider", choices=["nanobanana", "openai", "jimeng", "mock"], default="nanobanana")
     repaint.add_argument("--input", type=Path, required=True)
     repaint.add_argument("--output", type=Path, required=True)
     repaint.add_argument("--prompt", required=True)
@@ -360,6 +369,38 @@ def main() -> int:
         return 0
 
     if args.command == "repair-resource-sets":
+        from .db import list_incorrectly_merged_resource_sets
+
+        # Phase 0: Split assets sharing the same asset_id (old format without path)
+        shared_split_count = split_shared_asset_ids(connection)
+        raw_removed = remove_raw_from_resource_sets(connection)
+
+        # Phase 1: Split incorrectly merged sets (different-directory independent exports)
+        split_count = 0
+        merged_sets = list_incorrectly_merged_resource_sets(connection)
+        for merged in merged_sets:
+            set_id = merged["set_id"]
+            # Keep the primary (first member) in the original set,
+            # remove all other independent (no parent) exports so they become orphans
+            independent = [m for m in merged["members"] if not m["parent_asset_id"]]
+            # Keep the first one, detach the rest
+            for member in independent[1:]:
+                connection.execute(
+                    "DELETE FROM resource_set_items WHERE set_id = ? AND asset_id = ?",
+                    (set_id, member["asset_id"]),
+                )
+                split_count += 1
+            # Update set_item_count by checking if set is now empty
+            remaining = connection.execute(
+                "SELECT COUNT(*) AS item_count FROM resource_set_items WHERE set_id = ?",
+                (set_id,),
+            ).fetchone()
+            if remaining is not None and int(remaining["item_count"]) == 0:
+                connection.execute("DELETE FROM resource_sets WHERE set_id = ?", (set_id,))
+        if split_count:
+            connection.commit()
+
+        # Phase 2: Attach assets missing a resource set
         repaired = 0
         primaries_created = 0
         versions_attached = 0
@@ -367,7 +408,6 @@ def main() -> int:
         for row in missing:
             asset_id = str(row["asset_id"])
             stem = str(row["stem"])
-            raw_asset_id = str(row["raw_asset_id"]) if row["raw_asset_id"] else None
             origin_stem, version_kind = _infer_origin_stem(stem)
             origin_asset_id = None
             if origin_stem:
@@ -379,7 +419,6 @@ def main() -> int:
                     connection,
                     asset_id,
                     origin_asset_id=origin_asset_id,
-                    raw_asset_id=raw_asset_id,
                     version_kind=version_kind,
                     commit=False,
                 )
@@ -389,13 +428,13 @@ def main() -> int:
                     connection,
                     asset_id,
                     origin_asset_id=None,
-                    raw_asset_id=raw_asset_id,
                     version_kind="import",
                     commit=False,
                 )
                 primaries_created += 1
             repaired += 1
 
+        # Phase 3: Reassign singleton derived sets
         repaired_singletons = 0
         suspect_sets = list_singleton_primary_resource_sets(connection)
         for row in suspect_sets:
@@ -411,7 +450,6 @@ def main() -> int:
                 connection,
                 str(row["primary_asset_id"]),
                 origin_asset_id=origin_asset_id,
-                raw_asset_id=None,
                 version_kind=version_kind,
                 commit=False,
             )
@@ -421,11 +459,33 @@ def main() -> int:
         connection.commit()
         print(json.dumps({
             "ok": True,
+            "shared_assets_split": shared_split_count,
+            "raw_removed_from_sets": raw_removed,
+            "split_merged_sets": split_count,
             "repaired": repaired,
             "primaries_created": primaries_created,
             "versions_attached": versions_attached,
             "singleton_versions_reassigned": repaired_singletons,
         }, indent=2))
+        return 0
+
+    if args.command == "split-shared-assets":
+        count = split_shared_asset_ids(connection)
+        raw_removed = remove_raw_from_resource_sets(connection)
+        print(json.dumps({"ok": True, "split_count": count, "raw_removed": raw_removed}, indent=2))
+        return 0
+
+    if args.command == "list-ai-models":
+        effective_key = args.api_key
+        if not effective_key:
+            provider_key = f"ai_provider_token:{args.provider}"
+            config = get_app_setting(connection, provider_key)
+            effective_key = config.get("token") if isinstance(config, dict) else None
+        if not effective_key:
+            print(json.dumps({"error": f"No API key for {args.provider}"}))
+            return 1
+        models = list_provider_models(args.provider, effective_key)
+        print(json.dumps(models, indent=2))
         return 0
 
     if args.command == "run-ai-repaint-job":
@@ -442,6 +502,7 @@ def main() -> int:
             aspect_ratio=args.aspect_ratio,
             image_size=args.image_size,
             temperature=args.temperature,
+            model=getattr(args, "model", None),
         )
         print(json.dumps(payload, indent=2))
         return 0
@@ -452,6 +513,16 @@ def main() -> int:
                 input_path=args.input,
                 output_path=args.output,
                 prompt=args.prompt,
+            )
+        elif args.provider == OPENAI_PROVIDER:
+            payload = run_openai_repaint(
+                input_path=args.input,
+                output_path=args.output,
+                prompt=args.prompt,
+                api_key=args.api_key,
+                model=args.model or DEFAULT_OPENAI_MODEL,
+                aspect_ratio=args.aspect_ratio,
+                image_size=args.image_size,
             )
         else:
             payload = run_nanobanana_repaint(
@@ -654,6 +725,7 @@ def main() -> int:
             identifier = args.asset_id
         if row is None:
             raise SystemExit(f"unknown export asset: {identifier}")
+        duplicates = get_duplicate_assets(connection, row["asset_id"])
         payload = {
             "asset_id": row["asset_id"],
             "stem": row["stem"],
@@ -682,6 +754,10 @@ def main() -> int:
             "set_raw_asset_id": row["set_raw_asset_id"],
             "primary_stem": row["primary_stem"],
             "set_item_count": row["set_item_count"],
+            "duplicates": [
+                {"asset_id": d["asset_id"], "export_path": d["export_path"], "stem": d["stem"]}
+                for d in duplicates
+            ],
         }
         print(json.dumps(payload, indent=2))
         return 0
@@ -760,8 +836,7 @@ def main() -> int:
             connection,
             asset_id,
             origin_asset_id=origin_asset_id,
-            raw_asset_id=raw_asset_id,
-            version_kind="derived",
+            version_kind="derived" if origin_asset_id else "import",
             commit=True,
         )
 

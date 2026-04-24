@@ -99,7 +99,10 @@ def quick_fingerprint_from_handle(
     return sha1.hexdigest()
 
 
-def stable_asset_id(prefix: str, fingerprint: str) -> str:
+def stable_asset_id(prefix: str, fingerprint: str, path: str | None = None) -> str:
+    if path:
+        digest = hashlib.sha1(f"{fingerprint}:{path}".encode()).hexdigest()
+        return f"{prefix}_{digest[:24]}"
     return f"{prefix}_{fingerprint[:24]}"
 
 
@@ -634,7 +637,7 @@ def extract_export_candidate(path: Path, fingerprint_mode: str = "head-tail") ->
     if width is None or height is None:
         width, height = read_image_dimensions_from_bytes(sample) if stat.st_size else (None, None)
     return ExportCandidate(
-        asset_id=stable_asset_id("export", fingerprint),
+        asset_id=stable_asset_id("export", fingerprint, str(resolved_path)),
         path=resolved_path,
         stem=path.stem,
         normalized_stem=normalize_stem(path.stem),

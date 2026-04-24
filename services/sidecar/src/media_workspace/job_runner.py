@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from .ai_repaint import DEFAULT_GEMINI_MODEL, run_mock_repaint, run_nanobanana_repaint
+from .ai_repaint import DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_JIMENG_MODEL, OPENAI_PROVIDER, JIMENG_PROVIDER, run_mock_repaint, run_nanobanana_repaint, run_openai_repaint, run_jimeng_repaint
 from .catalog import ensure_catalog
 from .config import Thresholds
 from .db import (
     attach_asset_to_resource_set,
     get_app_setting,
+    list_export_assets_missing_resource_set,
     update_job,
     upsert_export_asset,
     upsert_preview_entry,
@@ -207,6 +209,13 @@ def run_import_job(
                 refresh=True,
                 progress_callback=resolve_progress,
             )
+            # Create resource sets for any exports that don't have one yet
+            for row in list_export_assets_missing_resource_set(connection):
+                attach_asset_to_resource_set(
+                    connection, str(row["asset_id"]),
+                    version_kind="import", commit=False,
+                )
+            connection.commit()
             phase_results.append(_phase_result(resolve_phase, resolve_result))
             phase_cursor += 1
 
@@ -412,6 +421,7 @@ def run_ai_repaint_job(
     aspect_ratio: str | None = None,
     image_size: str | None = None,
     temperature: float | None = None,
+    model: str | None = None,
 ) -> dict[str, object]:
     payload = {
         "provider": provider,
@@ -444,15 +454,46 @@ def run_ai_repaint_job(
                 effective_api_key = config.get("token") if isinstance(config, dict) else None
             if not effective_api_key:
                 raise ValueError(f"No API token configured for provider '{provider}'.")
-            result = run_nanobanana_repaint(
-                input_path=input_path,
-                output_path=output_path,
-                prompt=prompt,
-                api_key=effective_api_key,
-                model=DEFAULT_GEMINI_MODEL,
-                aspect_ratio=aspect_ratio,
-                image_size=image_size,
-            )
+            if provider == JIMENG_PROVIDER:
+                # Jimeng uses ak/sk pair stored as JSON in the token field
+                ak, sk = None, None
+                if effective_api_key:
+                    try:
+                        creds = json.loads(effective_api_key)
+                        ak, sk = creds.get("access_key_id"), creds.get("secret_access_key")
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                result = run_jimeng_repaint(
+                    input_path=input_path,
+                    output_path=output_path,
+                    prompt=prompt,
+                    access_key_id=ak,
+                    secret_access_key=sk,
+                    model=model or DEFAULT_JIMENG_MODEL,
+                    aspect_ratio=aspect_ratio,
+                    image_size=image_size,
+                    scale=temperature,
+                )
+            elif provider == OPENAI_PROVIDER:
+                result = run_openai_repaint(
+                    input_path=input_path,
+                    output_path=output_path,
+                    prompt=prompt,
+                    api_key=effective_api_key,
+                    model=model or DEFAULT_OPENAI_MODEL,
+                    aspect_ratio=aspect_ratio,
+                    image_size=image_size,
+                )
+            else:
+                result = run_nanobanana_repaint(
+                    input_path=input_path,
+                    output_path=output_path,
+                    prompt=prompt,
+                    api_key=effective_api_key,
+                    model=model or DEFAULT_GEMINI_MODEL,
+                    aspect_ratio=aspect_ratio,
+                    image_size=image_size,
+                )
 
         candidate = extract_export_candidate(Path(result.output_path), fingerprint_mode="head-only")
         asset_id = upsert_export_asset(connection, candidate, commit=True)
@@ -504,7 +545,6 @@ def run_ai_repaint_job(
             connection,
             asset_id,
             origin_asset_id=origin_asset_id,
-            raw_asset_id=raw_asset_id,
             version_kind="ai_repaint",
             commit=True,
         )

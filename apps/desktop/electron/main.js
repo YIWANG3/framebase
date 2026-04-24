@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, protocol, net } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, protocol, net, safeStorage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
@@ -58,43 +58,91 @@ function readAppSettings() {
   }
 }
 
+// Serialize all read-modify-write operations to prevent race conditions
+let _settingsWriteQueue = Promise.resolve();
+
 async function writeAppSettings(settings) {
   const settingsPath = getAppSettingsPath();
   await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
   await fs.promises.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf-8");
 }
 
+/**
+ * Atomically read-modify-write app settings.
+ * All callers that modify settings MUST use this to avoid race conditions.
+ */
+function updateAppSettings(mutateFn) {
+  _settingsWriteQueue = _settingsWriteQueue.then(async () => {
+    const settings = readAppSettings();
+    const next = mutateFn(settings);
+    await writeAppSettings(next);
+    return next;
+  });
+  return _settingsWriteQueue;
+}
+
+function encryptToken(plaintext) {
+  if (!safeStorage.isEncryptionAvailable()) return plaintext;
+  return safeStorage.encryptString(plaintext).toString("base64");
+}
+
+function decryptToken(stored) {
+  if (!stored) return null;
+  // If it doesn't look like base64-encoded encrypted data, treat as legacy plaintext
+  if (!safeStorage.isEncryptionAvailable()) return stored;
+  try {
+    return safeStorage.decryptString(Buffer.from(stored, "base64"));
+  } catch {
+    // Legacy plaintext token — return as-is
+    return stored;
+  }
+}
+
 function getStoredProviderConfig(provider) {
   const settings = readAppSettings();
-  return settings?.aiProviders?.[provider] || null;
+  const entry = settings?.aiProviders?.[provider];
+  if (!entry) return null;
+  return { ...entry, token: decryptToken(entry.token) };
 }
 
 async function setStoredProviderConfig(provider, config) {
-  const settings = readAppSettings();
-  const next = {
+  const encrypted = {
+    ...config,
+    token: config.token ? encryptToken(config.token) : null,
+  };
+  await updateAppSettings((settings) => ({
     ...settings,
     aiProviders: {
       ...(settings.aiProviders || {}),
-      [provider]: config,
+      [provider]: encrypted,
     },
-  };
-  await writeAppSettings(next);
-  return next.aiProviders[provider];
+  }));
+  return { ...encrypted, token: config.token };
 }
 
 async function deleteStoredProviderConfig(provider) {
-  const settings = readAppSettings();
-  const nextProviders = { ...(settings.aiProviders || {}) };
-  delete nextProviders[provider];
-  await writeAppSettings({
-    ...settings,
-    aiProviders: nextProviders,
+  await updateAppSettings((settings) => {
+    const nextProviders = { ...(settings.aiProviders || {}) };
+    delete nextProviders[provider];
+    return { ...settings, aiProviders: nextProviders };
   });
 }
 
 async function getStoredProviderConfigWithMigration(provider) {
   const existing = getStoredProviderConfig(provider);
   if (existing?.token) {
+    // Re-encrypt legacy plaintext tokens transparently
+    const settings = readAppSettings();
+    const raw = settings?.aiProviders?.[provider]?.token;
+    if (raw && safeStorage.isEncryptionAvailable()) {
+      try {
+        Buffer.from(raw, "base64");
+        safeStorage.decryptString(Buffer.from(raw, "base64"));
+      } catch {
+        // Was plaintext — re-save encrypted
+        await setStoredProviderConfig(provider, { token: existing.token });
+      }
+    }
     return existing;
   }
   try {
@@ -111,6 +159,9 @@ async function getStoredProviderConfigWithMigration(provider) {
 
 function prepareCatalogPath() {
   fs.mkdirSync(currentCatalogPath, { recursive: true });
+  // Migrate and repair resource sets on startup
+  try { callSidecar(["split-shared-assets"]); } catch (_) { /* best-effort */ }
+  try { callSidecar(["repair-resource-sets"]); } catch (_) { /* best-effort */ }
 }
 
 function workspaceInfo() {
@@ -538,7 +589,9 @@ async function startAiRepaintTask(options) {
   if (!sourcePath) {
     throw new Error("Missing source image");
   }
-  if (!prompt.trim()) {
+  const model = String(options?.model || "");
+  const isUpscale = model === "jimeng_i2i_seed3_tilesr_cvtob";
+  if (!prompt.trim() && !isUpscale) {
     throw new Error("Missing prompt");
   }
   const current = latestJobStatus("ai_repaint");
@@ -559,6 +612,7 @@ async function startAiRepaintTask(options) {
     aspect_ratio: options?.aspectRatio || null,
     image_size: options?.resolution ? String(options.resolution).toUpperCase() : null,
     temperature: typeof options?.temperature === "number" ? options.temperature : null,
+    model,
   };
   const job = createJob("ai_repaint", payload);
   const command = [
@@ -584,6 +638,9 @@ async function startAiRepaintTask(options) {
   }
   if (typeof payload.temperature === "number") {
     command.push("--temperature", String(payload.temperature));
+  }
+  if (model) {
+    command.push("--model", model);
   }
   command.push("--api-key", apiKey);
   launchSidecarJob(command);
@@ -746,17 +803,35 @@ ipcMain.handle("workspace:ai-repaint-status", () => latestJobStatus("ai_repaint"
 
 ipcMain.handle("workspace:ai-repaint-start", (_event, options) => startAiRepaintTask(options));
 
+ipcMain.handle("workspace:list-ai-models", async (_event, provider) => {
+  const providerKey = String(provider || "nanobanana");
+  const providerConfig = await getStoredProviderConfigWithMigration(providerKey);
+  const apiKey = providerConfig?.token || null;
+  if (!apiKey) return [];
+  try {
+    return callSidecarJson(["list-ai-models", "--provider", providerKey, "--api-key", apiKey]) || [];
+  } catch (err) {
+    console.error("[list-ai-models] error:", err.message);
+    return [];
+  }
+});
+
+ipcMain.handle("workspace:get-ai-preferences", () => {
+  const settings = readAppSettings();
+  return settings?.aiPreferences ?? {};
+});
+
+ipcMain.handle("workspace:save-ai-preferences", async (_event, prefs) => {
+  await updateAppSettings((settings) => ({ ...settings, aiPreferences: prefs }));
+});
+
 ipcMain.handle("workspace:get-ai-styles", () => {
   const settings = readAppSettings();
-  console.log("[ai-styles] loading", settings?.aiStyles ? settings.aiStyles.length : 0, "styles");
   return settings?.aiStyles ?? null;
 });
 
 ipcMain.handle("workspace:save-ai-styles", async (_event, styles) => {
-  console.log("[ai-styles] saving", Array.isArray(styles) ? styles.length : "non-array", "styles");
-  const settings = readAppSettings();
-  await writeAppSettings({ ...settings, aiStyles: styles });
-  console.log("[ai-styles] saved to", getAppSettingsPath());
+  await updateAppSettings((settings) => ({ ...settings, aiStyles: styles }));
 });
 
 ipcMain.handle("workspace:get-ai-provider-token", async (_event, provider) => {
@@ -796,6 +871,10 @@ ipcMain.handle("workspace:browse", async (_event, options) => {
 
 ipcMain.handle("workspace:detail", async (_event, exportPath) => {
   return await callSidecarJsonAsync(["asset-detail", "--export-path", exportPath]);
+});
+
+ipcMain.handle("workspace:detail-by-id", async (_event, assetId) => {
+  return await callSidecarJsonAsync(["asset-detail", "--asset-id", assetId]);
 });
 
 ipcMain.handle("workspace:reveal", (_event, targetPath) => {

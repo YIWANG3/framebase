@@ -253,11 +253,11 @@ function CardContent({
   return (
     <button
       type="button"
-      onClick={(event) => onSelect(item.export_path, event)}
-      onDoubleClick={() => onOpen?.(item.export_path)}
+      onClick={(event) => onSelect(item.asset_id, event)}
+      onDoubleClick={() => onOpen?.(item.asset_id)}
       onContextMenu={onContextMenu}
       onDragStart={(event) => {
-        const payload = onPrepareDragSelection?.(item.export_path) || {
+        const payload = onPrepareDragSelection?.(item.asset_id) || {
           assetIds: [item.asset_id],
           exportPaths: [item.export_path],
         };
@@ -290,6 +290,7 @@ function CardContent({
         }
       }}
       data-gallery-item="true"
+      data-asset-id={item.asset_id}
       data-export-path={item.export_path}
       draggable
       className="group absolute text-left focus:outline-none"
@@ -348,8 +349,8 @@ function CardContent({
 
 export default function Gallery({
   items,
-  selectedExportPath,
-  selectedExportPaths,
+  selectedAssetId,
+  selectedAssetIds,
   onSelect,
   onOpen,
   onSelectMany,
@@ -367,7 +368,6 @@ export default function Gallery({
   totalCount,
   collections,
   activeCollectionId,
-  selectedAssetIds,
   onAddToCollection,
   onRemoveFromCollection,
   onDeleteFromCatalog,
@@ -383,16 +383,16 @@ export default function Gallery({
   const [viewportHeight, setViewportHeight] = useState(0);
   const [marquee, setMarquee] = useState(null);
   const selectionBaseRef = useRef([]);
-  const selectedPathSet = useMemo(() => new Set(selectedExportPaths || []), [selectedExportPaths]);
+  const selectedIdSet = useMemo(() => new Set(selectedAssetIds || []), [selectedAssetIds]);
   const isTileMode = displayMode === "tiles";
 
   function openContextMenu(event, item) {
     event.preventDefault();
     event.stopPropagation();
-    const contextAssetIds = selectedPathSet.has(item.export_path)
+    const contextAssetIds = selectedIdSet.has(item.asset_id)
       ? selectedAssetIds
       : [item.asset_id];
-    onContextSelect?.(item.export_path);
+    onContextSelect?.(item.asset_id);
     setContextMenu({ x: event.clientX, y: event.clientY, item, assetIds: contextAssetIds });
   }
 
@@ -505,6 +505,7 @@ export default function Gallery({
         ? waterfallLayout?.positions
         : gridLayout?.positions;
     return (source || []).map((entry, index) => ({
+      assetId: entry.item.asset_id,
       exportPath: entry.item.export_path,
       index,
       left: entry.left,
@@ -518,19 +519,19 @@ export default function Gallery({
     onLayoutItemsChange?.(layoutItems);
   }, [layoutItems, onLayoutItemsChange]);
 
-  const prevSelectedRef = useRef(selectedExportPath);
+  const prevSelectedRef = useRef(selectedAssetId);
   useEffect(() => {
-    if (prevSelectedRef.current === selectedExportPath) return;
-    prevSelectedRef.current = selectedExportPath;
-    if (!selectedExportPath || !containerRef.current) return;
-    const escaped = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(selectedExportPath) : selectedExportPath.replaceAll('"', '\\"');
-    const element = containerRef.current.querySelector(`[data-export-path="${escaped}"]`);
+    if (prevSelectedRef.current === selectedAssetId) return;
+    prevSelectedRef.current = selectedAssetId;
+    if (!selectedAssetId || !containerRef.current) return;
+    const escaped = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(selectedAssetId) : selectedAssetId;
+    const element = containerRef.current.querySelector(`[data-asset-id="${escaped}"]`);
     if (element instanceof HTMLElement) {
       element.scrollIntoView({ block: "nearest", inline: "nearest" });
       return;
     }
 
-    const target = layoutItems.find((item) => item.exportPath === selectedExportPath);
+    const target = layoutItems.find((item) => item.assetId === selectedAssetId);
     if (!target) return;
 
     const viewportTop = containerRef.current.scrollTop;
@@ -541,7 +542,7 @@ export default function Gallery({
 
     const nextScrollTop = Math.max(0, targetTop - Math.max(24, (containerRef.current.clientHeight - target.height) / 2));
     containerRef.current.scrollTo({ top: nextScrollTop, behavior: "smooth" });
-  }, [selectedExportPath, layoutItems]);
+  }, [selectedAssetId, layoutItems]);
 
   const gridMetrics = useMemo(() => {
     if (displayMode !== "grid" || !gridLayout) return null;
@@ -619,12 +620,12 @@ export default function Gallery({
       const intersected = layoutItems
         .filter((item) => item.left < right && item.left + item.width > left && item.top < bottom && item.top + item.height > top)
         .sort((a, b) => a.index - b.index)
-        .map((item) => item.exportPath);
-      const nextPaths = nextMarquee.additive
+        .map((item) => item.assetId);
+      const nextIds = nextMarquee.additive
         ? Array.from(new Set([...selectionBaseRef.current, ...intersected]))
         : intersected;
-      const primaryPath = intersected[intersected.length - 1] || (nextMarquee.additive ? selectedExportPath : null);
-      onSelectMany?.(nextPaths, primaryPath, nextMarquee.anchorPath || primaryPath);
+      const primaryId = intersected[intersected.length - 1] || (nextMarquee.additive ? selectedAssetId : null);
+      onSelectMany?.(nextIds, primaryId, nextMarquee.anchorId || primaryId);
     }
 
     function handlePointerMove(event) {
@@ -653,7 +654,7 @@ export default function Gallery({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [layoutItems, marquee, onClearSelection, onSelectMany, selectedExportPath]);
+  }, [layoutItems, marquee, onClearSelection, onSelectMany, selectedAssetId]);
 
   if (loading || (!browserReady && !items.length) || (!items.length && totalCount > 0)) {
     return (
@@ -685,7 +686,7 @@ export default function Gallery({
         }
         const point = getContentPoint(event.clientX, event.clientY);
         const additive = event.metaKey || event.ctrlKey;
-        selectionBaseRef.current = additive ? selectedExportPaths || [] : [];
+        selectionBaseRef.current = additive ? selectedAssetIds || [] : [];
         setMarquee({
           originX: point.x,
           originY: point.y,
@@ -693,7 +694,7 @@ export default function Gallery({
           currentY: point.y,
           moved: false,
           additive,
-          anchorPath: selectedExportPath || selectedExportPaths?.[0] || null,
+          anchorId: selectedAssetId || selectedAssetIds?.[0] || null,
         });
       }}
       className={`h-full select-none overflow-auto bg-app ${isTileMode ? "px-0 py-0" : "px-2 py-2"}`}
@@ -703,10 +704,10 @@ export default function Gallery({
           const item = entry.item;
           const imgHeight = entry.height ?? entry.imgHeight;
           return (
-            <div key={item.export_path} className="absolute" style={{ left: `${entry.left}px`, top: `${entry.top}px` }}>
+            <div key={item.asset_id} className="absolute" style={{ left: `${entry.left}px`, top: `${entry.top}px` }}>
               <CardContent
                 item={item}
-                selected={selectedPathSet.has(item.export_path)}
+                selected={selectedIdSet.has(item.asset_id)}
                 onSelect={onSelect}
                 onOpen={onOpen}
                 onContextMenu={(event) => openContextMenu(event, item)}

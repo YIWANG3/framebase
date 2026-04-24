@@ -97,7 +97,14 @@ export default function Lightbox({
   // Related versions for the version strip
   const relatedVersions = useMemo(() => {
     if (!currentItem?.resource_set_id || !allItems?.length) return [];
-    return allItems.filter((item) => item.resource_set_id === currentItem.resource_set_id);
+    const setItems = allItems.filter((item) => item.resource_set_id === currentItem.resource_set_id);
+    // Deduplicate by asset_id: same asset imported from multiple paths is NOT a separate version
+    const seen = new Set();
+    return setItems.filter((item) => {
+      if (seen.has(item.asset_id)) return false;
+      seen.add(item.asset_id);
+      return true;
+    });
   }, [allItems, currentItem?.resource_set_id]);
   const metaWidth = Number(currentItem?.export_metadata?.width || 0);
   const metaHeight = Number(currentItem?.export_metadata?.height || 0);
