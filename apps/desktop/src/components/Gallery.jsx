@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { LoaderCircle, Images, FolderPlus, FolderMinus, Folder, ChevronRight, Eye, Copy, Pencil, Trash2 } from "lucide-react";
+import { LoaderCircle, Images, FolderPlus, FolderMinus, Folder, ChevronRight, Columns2, LayoutGrid, Eye, Pencil, Trash2 } from "lucide-react";
 import { fileName, galleryInfoLabel, buildJustifiedLayout, localFileUrl } from "../utils/format";
 import PreviewImage from "./PreviewImage";
 
@@ -158,7 +158,7 @@ function MenuItem({ icon: Icon, label, shortcut, onClick, children }) {
   );
 }
 
-function ContextMenu({ x, y, item, collections, activeCollectionId, onAddTo, onRemoveFrom, onReveal, onEdit, onDeleteFromCatalog, onClose }) {
+function ContextMenu({ x, y, item, assetIds, collections, activeCollectionId, onAddTo, onRemoveFrom, onReveal, onEdit, onDeleteFromCatalog, onCompare, onCollage, onClose }) {
   const ref = useRef(null);
   useEffect(() => {
     function handlePointerDown(e) {
@@ -203,6 +203,12 @@ function ContextMenu({ x, y, item, collections, activeCollectionId, onAddTo, onR
       style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
     >
       <MenuItem icon={Pencil} label="Edit…" shortcut="E" onClick={() => { onEdit?.(item.export_path); onClose(); }} />
+      {assetIds?.length === 2 && (
+        <MenuItem icon={Columns2} label="Compare" onClick={() => { onCompare?.(assetIds); onClose(); }} />
+      )}
+      {assetIds?.length >= 2 && (
+        <MenuItem icon={LayoutGrid} label="Collage" onClick={() => { onCollage?.(assetIds); onClose(); }} />
+      )}
       <MenuItem icon={Eye} label="Reveal in Finder" shortcut="⌘↵" onClick={() => { onReveal?.(item.export_path); onClose(); }} />
       <MenuItem icon={Trash2} label="Delete from Catalog" onClick={() => { onDeleteFromCatalog?.(); onClose(); }} />
 
@@ -245,7 +251,7 @@ function CardContent({
   containerRef,
   captionHeight = CAPTION_HEIGHT,
   compact = false,
-  showVersionBadge = false,
+  showVersionBadge = false, // deprecated — kept for compat
 }) {
   const title = fileName(item.export_path) || item.stem;
   const totalHeight = height + captionHeight;
@@ -320,12 +326,6 @@ function CardContent({
         ) : (
           <div className="flex h-full w-full items-center justify-center text-[11px] text-muted">No preview</div>
         )}
-        {showVersionBadge && item.set_item_count > 1 ? (
-          <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded bg-black/40 px-1 py-0.5 text-[9px] font-medium text-white/70 backdrop-blur-sm">
-            <Copy className="h-2.5 w-2.5" />
-            {item.set_item_count}
-          </div>
-        ) : null}
       </div>
       {captionHeight > 0 ? (
         <div className="px-0.5 pt-1.5">
@@ -372,7 +372,8 @@ export default function Gallery({
   onRemoveFromCollection,
   onDeleteFromCatalog,
   onEdit,
-  versionMode,
+  onCompare,
+  onCollage,
 }) {
   const containerRef = useRef(null);
   const scrollRafRef = useRef(0);
@@ -718,7 +719,6 @@ export default function Gallery({
                 containerRef={containerRef}
                 captionHeight={entry.captionHeight ?? CAPTION_HEIGHT}
                 compact={isTileMode}
-                showVersionBadge={versionMode === "primary"}
               />
             </div>
           );
@@ -740,6 +740,7 @@ export default function Gallery({
           x={contextMenu.x}
           y={contextMenu.y}
           item={contextMenu.item}
+          assetIds={contextMenu.assetIds}
           collections={collections}
           activeCollectionId={activeCollectionId}
           onAddTo={(collectionId) => onAddToCollection?.(collectionId, contextMenu.assetIds || [contextMenu.item.asset_id])}
@@ -747,6 +748,8 @@ export default function Gallery({
           onDeleteFromCatalog={() => onDeleteFromCatalog?.(contextMenu.assetIds || [contextMenu.item.asset_id])}
           onReveal={(path) => window.mediaWorkspace?.revealPath?.(path)}
           onEdit={onEdit}
+          onCompare={onCompare}
+          onCollage={onCollage}
           onClose={closeContextMenu}
         />
       )}

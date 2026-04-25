@@ -133,7 +133,7 @@ export default function useWorkspace() {
           : enrichmentTask?.running
             ? "Enrichment running"
             : previewTask?.running
-              ? "Generating previews"
+              ? previewTask._kind === "preview-hd" ? "Generating HD previews" : "Generating previews"
               : "Import attention needed",
         status: importTask?.running
           ? "Import in progress"
@@ -266,10 +266,13 @@ export default function useWorkspace() {
   }
 
   async function removeFromCollection(collectionId, assetIds) {
-    await window.mediaWorkspace.collectionRemoveItems(collectionId, assetIds);
+    const targetIds = [...new Set((assetIds || []).filter(Boolean))];
+    if (!targetIds.length) return;
+    await window.mediaWorkspace.collectionRemoveItems(collectionId, targetIds);
     await loadCollections();
     if (activeCollectionId === collectionId) {
-      await loadBrowser({ collectionId });
+      const removedSet = new Set(targetIds);
+      setItems((current) => current.filter((item) => !removedSet.has(item.asset_id)));
     }
   }
 
@@ -410,10 +413,10 @@ export default function useWorkspace() {
     setEnrichmentTask(task);
   }
 
-  async function runPreviewGeneration() {
+  async function runPreviewGeneration(kind = "preview") {
     if (importTask?.running || previewTask?.running) return;
-    const task = await window.mediaWorkspace.startPreviewGeneration();
-    setPreviewTask(task);
+    const task = await window.mediaWorkspace.startPreviewGeneration(kind);
+    setPreviewTask({ ...task, _kind: kind });
   }
 
   async function switchCatalog(nextCatalogPath) {
@@ -517,13 +520,22 @@ export default function useWorkspace() {
       }
       return undefined;
     }
+    const currentKind = previewTask._kind || "preview";
     previewPollRef.current = window.setInterval(async () => {
       const task = await window.mediaWorkspace.getPreviewStatus();
-      setPreviewTask(task);
       if (!task?.running) {
         clearInterval(previewPollRef.current);
         previewPollRef.current = null;
-        await refreshAll();
+        if (currentKind === "preview") {
+          // Auto-start preview-hd after preview completes
+          const hdTask = await window.mediaWorkspace.startPreviewGeneration("preview-hd");
+          setPreviewTask({ ...hdTask, _kind: "preview-hd" });
+        } else {
+          setPreviewTask(task);
+          await refreshAll();
+        }
+      } else {
+        setPreviewTask({ ...task, _kind: currentKind });
       }
     }, 1500);
     return () => {
@@ -532,7 +544,7 @@ export default function useWorkspace() {
         previewPollRef.current = null;
       }
     };
-  }, [previewTask?.running]);
+  }, [previewTask?.running, previewTask?._kind]);
 
   useEffect(() => {
     if (!enrichmentTask?.running) {
@@ -568,6 +580,7 @@ export default function useWorkspace() {
     setInspectorWidth,
     info,
     summary,
+    items,
     filteredItems,
     detail,
     selectedAssetId,

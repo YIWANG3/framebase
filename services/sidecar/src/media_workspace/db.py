@@ -102,6 +102,74 @@ def delete_app_setting(connection: sqlite3.Connection, setting_key: str, commit:
         connection.commit()
 
 
+def list_repaint_history(connection: sqlite3.Connection, asset_path: str) -> list[dict]:
+    """Return all AI repaint records for the resource set that contains *asset_path*."""
+    # 1. Find asset_id from path
+    row = connection.execute(
+        "SELECT asset_id FROM asset_files WHERE path = ?",
+        (asset_path,),
+    ).fetchone()
+    if not row:
+        return []
+    asset_id = row["asset_id"]
+
+    # 2. Find its resource set
+    rs = get_resource_set_for_asset(connection, asset_id)
+    if not rs:
+        return []
+    set_id = rs["set_id"]
+
+    # 3. Get all ai_repaint members in this set
+    repaint_members = connection.execute(
+        """
+        SELECT rsi.asset_id, assets.canonical_path, rsi.parent_asset_id
+        FROM resource_set_items rsi
+        JOIN assets ON assets.asset_id = rsi.asset_id
+        WHERE rsi.set_id = ? AND rsi.version_kind = 'ai_repaint'
+        ORDER BY rsi.sort_order
+        """,
+        (set_id,),
+    ).fetchall()
+
+    if not repaint_members:
+        return []
+
+    # 4. For each repaint member, find the matching succeeded job
+    results = []
+    for member in repaint_members:
+        output_path = member["canonical_path"]
+        job = connection.execute(
+            """
+            SELECT job_id, payload_json, result_json, created_at
+            FROM jobs
+            WHERE job_type = 'ai_repaint' AND status = 'succeeded'
+              AND json_extract(result_json, '$.output_path') = ?
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (output_path,),
+        ).fetchone()
+        entry: dict = {
+            "asset_id": member["asset_id"],
+            "output_path": output_path,
+            "parent_asset_id": member["parent_asset_id"],
+        }
+        if job:
+            payload = json.loads(job["payload_json"])
+            result = json.loads(job["result_json"])
+            entry.update({
+                "input_path": payload.get("input_path"),
+                "prompt": result.get("prompt") or payload.get("prompt", ""),
+                "provider": result.get("provider") or payload.get("provider"),
+                "model": result.get("model"),
+                "temperature": payload.get("temperature"),
+                "aspect_ratio": payload.get("aspect_ratio"),
+                "resolution": payload.get("image_size"),
+                "created_at": job["created_at"],
+            })
+        results.append(entry)
+    return results
+
+
 def _file_id(asset_id: str, path: str) -> str:
     digest = sha1(path.encode("utf-8")).hexdigest()[:16]
     return f"file_{asset_id}_{digest}"
@@ -1120,6 +1188,7 @@ def list_export_assets(
             raw_assets.canonical_path AS raw_path,
             raw_assets.metadata_json AS raw_metadata_json,
             preview_entries.relative_path AS preview_relative_path,
+            preview_hd_entries.relative_path AS preview_hd_relative_path,
             rsi.set_id AS resource_set_id,
             rsi.role AS resource_role,
             rsi.version_kind AS version_kind,
@@ -1149,6 +1218,10 @@ def list_export_assets(
             ON preview_entries.asset_id = assets.asset_id
            AND preview_entries.kind = 'preview'
            AND preview_entries.status = 'ready'
+        LEFT JOIN preview_entries AS preview_hd_entries
+            ON preview_hd_entries.asset_id = assets.asset_id
+           AND preview_hd_entries.kind = 'preview-hd'
+           AND preview_hd_entries.status = 'ready'
         WHERE {status_clause}
           {search_clause}
         ORDER BY assets.stem, registry.export_path
@@ -1327,6 +1400,7 @@ def get_export_asset_detail(connection: sqlite3.Connection, asset_id: str) -> sq
             raw_assets.metadata_json AS raw_metadata_json,
             export_preview.relative_path AS export_preview_relative_path,
             raw_preview.relative_path AS raw_preview_relative_path,
+            export_preview_hd.relative_path AS export_preview_hd_relative_path,
             rsi.set_id AS resource_set_id,
             rsi.role AS resource_role,
             rsi.version_kind AS version_kind,
@@ -1366,6 +1440,10 @@ def get_export_asset_detail(connection: sqlite3.Connection, asset_id: str) -> sq
             ON raw_preview.asset_id = registry.raw_asset_id
            AND raw_preview.kind = 'preview'
            AND raw_preview.status = 'ready'
+        LEFT JOIN preview_entries AS export_preview_hd
+            ON export_preview_hd.asset_id = assets.asset_id
+           AND export_preview_hd.kind = 'preview-hd'
+           AND export_preview_hd.status = 'ready'
         WHERE assets.asset_id = ?
           AND assets.asset_type = 'export'
         """,
@@ -1392,6 +1470,7 @@ def get_export_asset_detail_by_path(connection: sqlite3.Connection, export_path:
             raw_assets.metadata_json AS raw_metadata_json,
             export_preview.relative_path AS export_preview_relative_path,
             raw_preview.relative_path AS raw_preview_relative_path,
+            export_preview_hd.relative_path AS export_preview_hd_relative_path,
             rsi.set_id AS resource_set_id,
             rsi.role AS resource_role,
             rsi.version_kind AS version_kind,
@@ -1426,6 +1505,10 @@ def get_export_asset_detail_by_path(connection: sqlite3.Connection, export_path:
             ON raw_preview.asset_id = registry.raw_asset_id
            AND raw_preview.kind = 'preview'
            AND raw_preview.status = 'ready'
+        LEFT JOIN preview_entries AS export_preview_hd
+            ON export_preview_hd.asset_id = assets.asset_id
+           AND export_preview_hd.kind = 'preview-hd'
+           AND export_preview_hd.status = 'ready'
         WHERE registry.export_path = ?
         """,
         (export_path,),
@@ -1610,8 +1693,8 @@ def summary(connection: sqlite3.Connection) -> dict[str, int]:
         "preview_ready": connection.execute(
             "SELECT COUNT(*) FROM preview_entries WHERE kind = 'preview' AND status = 'ready'"
         ).fetchone()[0],
-        "proxy_ready": connection.execute(
-            "SELECT COUNT(*) FROM preview_entries WHERE kind = 'proxy' AND status = 'ready'"
+        "preview_hd_ready": connection.execute(
+            "SELECT COUNT(*) FROM preview_entries WHERE kind = 'preview-hd' AND status = 'ready'"
         ).fetchone()[0],
         "pending_matches": connection.execute(
             "SELECT COUNT(*) FROM export_lookup_registry WHERE match_status = 'pending_confirmation'"
@@ -1765,6 +1848,7 @@ def browse_collection(
             raw_assets.canonical_path AS raw_path,
             raw_assets.metadata_json AS raw_metadata_json,
             preview_entries.relative_path AS preview_relative_path,
+            preview_hd_entries.relative_path AS preview_hd_relative_path,
             rsi.set_id AS resource_set_id,
             rsi.role AS resource_role,
             rsi.version_kind AS version_kind,
@@ -1795,6 +1879,10 @@ def browse_collection(
             ON preview_entries.asset_id = assets.asset_id
            AND preview_entries.kind = 'preview'
            AND preview_entries.status = 'ready'
+        LEFT JOIN preview_entries AS preview_hd_entries
+            ON preview_hd_entries.asset_id = assets.asset_id
+           AND preview_hd_entries.kind = 'preview-hd'
+           AND preview_hd_entries.status = 'ready'
         WHERE ci.collection_id = ?
           AND assets.asset_type = 'export'
         ORDER BY ci.added_at DESC, assets.stem

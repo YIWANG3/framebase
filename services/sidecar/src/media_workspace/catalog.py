@@ -17,8 +17,8 @@ class CatalogPaths:
         return self.root / "previews"
 
     @property
-    def proxies_dir(self) -> Path:
-        return self.root / "proxies"
+    def previews_hd_dir(self) -> Path:
+        return self.root / "previews-hd"
 
     @property
     def derived_dir(self) -> Path:
@@ -49,7 +49,7 @@ def ensure_catalog(catalog_path: Path) -> CatalogPaths:
     catalog.root.mkdir(parents=True, exist_ok=True)
     for directory in (
         catalog.previews_dir,
-        catalog.proxies_dir,
+        catalog.previews_hd_dir,
         catalog.derived_dir,
         catalog.jobs_dir,
         catalog.logs_dir,

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlignJustify,
   Check,
+  ChevronDown,
   Columns2,
   KeyRound,
   Loader2,
@@ -96,6 +97,25 @@ const ACCENT_BUTTON =
 
 function PanelLabel({ children }) {
   return <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted2">{children}</div>;
+}
+
+function CollapsibleSection({ label, collapsed, onToggle, border = "border-b", className, children, trailing }) {
+  return (
+    <div className={cx(border, "border-border/60", className)}>
+      <div className="flex w-full items-center gap-2 px-4 py-3">
+        <button
+          type="button"
+          className="flex items-center gap-2 text-left"
+          onClick={onToggle}
+        >
+          <ChevronDown className={cx("h-3 w-3 text-muted2 transition-transform", collapsed && "-rotate-90")} />
+          <PanelLabel>{label}</PanelLabel>
+        </button>
+        {trailing && <div className="ml-auto">{trailing}</div>}
+      </div>
+      {!collapsed && <div className="px-4 pb-3">{children}</div>}
+    </div>
+  );
 }
 
 function StyleCard({ style, active, onSelect, onEdit, onDelete }) {
@@ -356,9 +376,13 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
   const [temperature, setTemperature] = useState(1);
   const [aspectRatio, setAspectRatio] = useState("auto");
   const [resolution, setResolution] = useState("4k");
+  const [customPrompt, setCustomPrompt] = useState("");
   const [compactStyles, setCompactStyles] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState(new Set());
   const [generateStatus, setGenerateStatus] = useState({ running: false, status: null, error: null });
   const [results, setResults] = useState([]);
+  const [repaintHistory, setRepaintHistory] = useState([]);
+  const [expandedHistoryId, setExpandedHistoryId] = useState(null);
   const [availableModels, setAvailableModels] = useState(() => {
     const init = {};
     for (const p of PROVIDERS) init[p.key] = p.defaultModels;
@@ -460,6 +484,32 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
       }
     };
   }, []);
+
+  function toggleSection(key) {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  // Load repaint history for current source image
+  useEffect(() => {
+    if (!sourcePath) return;
+    void (async () => {
+      const history = await window.mediaWorkspace?.listRepaintHistory?.(sourcePath);
+      if (Array.isArray(history)) setRepaintHistory(history);
+    })();
+  }, [sourcePath]);
+
+  // Refresh history after a new repaint completes
+  function refreshHistory() {
+    if (!sourcePath) return;
+    void (async () => {
+      const history = await window.mediaWorkspace?.listRepaintHistory?.(sourcePath);
+      if (Array.isArray(history)) setRepaintHistory(history);
+    })();
+  }
 
   function persistStyles(nextStyles) {
     void window.mediaWorkspace?.saveAiStyles?.(nextStyles);
@@ -566,7 +616,8 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
   }
 
   function queueApply() {
-    if (!isUpscaleModel && !selectedStyle) return;
+    const effectivePrompt = customPrompt.trim() || selectedStyle?.prompt;
+    if (!isUpscaleModel && !effectivePrompt) return;
     if (!providerConfigured) {
       setShowApiModal(true);
       return;
@@ -577,7 +628,7 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
       const task = await window.mediaWorkspace?.startAiRepaint?.({
         provider: providerKey,
         sourcePath,
-        prompt: isUpscaleModel ? "" : selectedStyle.prompt,
+        prompt: isUpscaleModel ? "" : effectivePrompt,
         aspectRatio: aspectRatio === "auto" ? null : aspectRatio,
         resolution,
         temperature,
@@ -616,6 +667,7 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
             ...prev,
           ]);
           onRepaintComplete?.();
+          refreshHistory();
         }
       }
     }, 1500);
@@ -628,11 +680,10 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
   }, [generateStatus.running]);
 
   return (
-    <>
-      <div className="max-h-[calc(100vh-10rem)] overflow-y-auto">
-        <div className="border-b border-border/60 px-4 py-3">
-          <PanelLabel>Provider</PanelLabel>
-          <div className="mt-2 flex items-center gap-2">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto py-2">
+        <CollapsibleSection label="Provider" collapsed={collapsedSections.has("provider")} onToggle={() => toggleSection("provider")}>
+          <div className="flex items-center gap-2">
             <select
               value={activeProviderKey || ""}
               onChange={(event) => updateActiveProvider(event.target.value)}
@@ -665,12 +716,10 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
               ))}
             </select>
           </div>
-        </div>
+        </CollapsibleSection>
 
-        <div className="border-b border-border/60 px-4 py-3">
-          <PanelLabel>Parameters</PanelLabel>
-
-          <div className={cx("mt-3", isUpscaleModel && "opacity-40 pointer-events-none")}>
+        <CollapsibleSection label="Parameters" collapsed={collapsedSections.has("parameters")} onToggle={() => toggleSection("parameters")}>
+          <div className={cx(isUpscaleModel && "opacity-40 pointer-events-none")}>
             <div className="flex items-center justify-between gap-3">
               <div className="text-[12px] text-text">Temperature</div>
               <input
@@ -731,46 +780,75 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
               ))}
             </select>
           </div>
-        </div>
+        </CollapsibleSection>
 
-        <div className={cx("border-b border-border/60 px-4 py-3", isUpscaleModel && "opacity-40 pointer-events-none")}>
-          <div className="flex items-center justify-between gap-2">
-            <PanelLabel>My Styles</PanelLabel>
-            <div className="flex items-center gap-1">
+        <CollapsibleSection
+          label="My Styles"
+          collapsed={collapsedSections.has("styles")}
+          onToggle={() => toggleSection("styles")}
+          className={isUpscaleModel ? "opacity-40 pointer-events-none" : undefined}
+          trailing={
+            /* eslint-disable-next-line jsx-a11y/click-events-have-key-events */
+            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
                 className={cx(
-                  "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                  "flex h-6 w-6 items-center justify-center rounded transition-colors",
                   compactStyles ? "text-muted2 hover:bg-hover hover:text-text" : "bg-hover text-text",
                 )}
                 onClick={() => setCompactStyles(false)}
                 title="Expanded view"
               >
-                <StretchHorizontal className="h-3.5 w-3.5" />
+                <StretchHorizontal className="h-3 w-3" />
               </button>
               <button
                 type="button"
                 className={cx(
-                  "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                  "flex h-6 w-6 items-center justify-center rounded transition-colors",
                   compactStyles ? "bg-hover text-text" : "text-muted2 hover:bg-hover hover:text-text",
                 )}
                 onClick={() => setCompactStyles(true)}
                 title="Compact view"
               >
-                <AlignJustify className="h-3.5 w-3.5" />
+                <AlignJustify className="h-3 w-3" />
               </button>
               <button
                 type="button"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border/70 bg-app text-text transition-colors hover:border-border hover:bg-hover"
+                className="flex h-6 w-6 items-center justify-center rounded border border-border/70 bg-app text-text transition-colors hover:border-border hover:bg-hover"
                 onClick={openCreateStyle}
                 title="New style"
               >
-                <Plus className="h-3.5 w-3.5" />
+                <Plus className="h-3 w-3" />
               </button>
             </div>
+          }
+        >
+          <div className="mb-3">
+            <div className="relative">
+              <textarea
+                value={customPrompt}
+                onChange={(event) => setCustomPrompt(event.target.value)}
+                placeholder="Enter a one-time prompt..."
+                rows={2}
+                className="w-full resize-none rounded-md border border-border/70 bg-app px-2.5 py-2 text-[12px] leading-5 text-text outline-none placeholder:text-muted2 hover:border-border focus:border-accent/50"
+              />
+              {customPrompt.trim() && (
+                <button
+                  type="button"
+                  className="mt-1.5 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-text"
+                  onClick={() => {
+                    setEditingStyleId("new");
+                    setStyleDraft({ name: "", prompt: customPrompt.trim() });
+                  }}
+                  title="Save as style"
+                >
+                  <Plus className="h-3 w-3" />
+                  Save as style
+                </button>
+              )}
+            </div>
           </div>
-
-          <div className={cx("mt-3", compactStyles ? "space-y-0.5" : "space-y-2")}>
+          <div className={cx(compactStyles ? "space-y-0.5" : "space-y-2")}>
             {!styles ? (
               <div className="flex items-center gap-2 py-4 text-[11px] text-muted2">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -796,14 +874,12 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
               />
             ))}
           </div>
-
-        </div>
+        </CollapsibleSection>
 
         {results.length > 0 ? (
-          <div className="border-t border-border/60 px-4 py-3">
-            <PanelLabel>Results</PanelLabel>
-            <div className="mt-2 space-y-1">
-              {results.map((r, i) => {
+          <CollapsibleSection label="Results" border="border-t" collapsed={collapsedSections.has("results")} onToggle={() => toggleSection("results")}>
+            <div className="space-y-1">
+              {results.map((r) => {
                 const name = r.path.split("/").pop();
                 const isComparing = compareState?.afterPath === r.path;
                 return (
@@ -857,12 +933,91 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
                 );
               })}
             </div>
-          </div>
+          </CollapsibleSection>
+        ) : null}
+
+        {repaintHistory.length > 0 ? (
+          <CollapsibleSection label="Versions" border="border-t" collapsed={collapsedSections.has("versions")} onToggle={() => toggleSection("versions")}>
+            <div className="space-y-0.5">
+              {repaintHistory.map((h) => {
+                const name = h.output_path.split("/").pop();
+                const isComparing = compareState?.afterPath === h.output_path;
+                const isExpanded = expandedHistoryId === h.asset_id;
+                return (
+                  <div key={h.asset_id}>
+                    <div
+                      className={cx(
+                        "group flex items-center gap-2 rounded-md px-2 py-1.5 text-[11px] transition-colors",
+                        isComparing ? "bg-[rgb(var(--accent-color)/0.12)] text-[rgb(var(--accent-color))]" : "text-muted hover:bg-hover hover:text-text",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        className="flex h-4 w-4 shrink-0 items-center justify-center text-muted2"
+                        onClick={() => setExpandedHistoryId(isExpanded ? null : h.asset_id)}
+                      >
+                        <ChevronDown className={cx("h-3 w-3 transition-transform", !isExpanded && "-rotate-90")} />
+                      </button>
+                      <span className="min-w-0 flex-1 truncate" title={h.output_path}>{name}</span>
+                      <button
+                        type="button"
+                        className={cx(
+                          "flex h-5 w-5 items-center justify-center rounded transition-colors",
+                          isComparing && compareState?.layout !== "stack"
+                            ? "text-[rgb(var(--accent-color))]"
+                            : "text-muted2 opacity-0 group-hover:opacity-100 hover:text-text",
+                        )}
+                        onClick={() => {
+                          if (isComparing && compareState?.layout !== "stack") {
+                            onCompareChange?.(null);
+                          } else {
+                            onCompareChange?.({ afterPath: h.output_path, layout: "side" });
+                          }
+                        }}
+                        title="Compare side-by-side"
+                      >
+                        <Columns2 className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        className={cx(
+                          "flex h-5 w-5 items-center justify-center rounded transition-colors",
+                          isComparing && compareState?.layout === "stack"
+                            ? "text-[rgb(var(--accent-color))]"
+                            : "text-muted2 opacity-0 group-hover:opacity-100 hover:text-text",
+                        )}
+                        onClick={() => {
+                          if (isComparing && compareState?.layout === "stack") {
+                            onCompareChange?.(null);
+                          } else {
+                            onCompareChange?.({ afterPath: h.output_path, layout: "stack" });
+                          }
+                        }}
+                        title="Compare top/bottom"
+                      >
+                        <Rows2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                    {isExpanded && (
+                      <div className="ml-6 mt-1 mb-1.5 space-y-1 rounded-md bg-app px-2.5 py-2 text-[11px] leading-5 text-muted">
+                        {h.prompt && <div><span className="text-muted2">Prompt: </span><span className="text-text">{h.prompt}</span></div>}
+                        {h.provider && <div><span className="text-muted2">Provider: </span>{h.provider}{h.model ? ` / ${h.model}` : ""}</div>}
+                        {h.temperature != null && <div><span className="text-muted2">Temperature: </span>{h.temperature}</div>}
+                        {h.resolution && <div><span className="text-muted2">Resolution: </span>{h.resolution}</div>}
+                        {h.aspect_ratio && <div><span className="text-muted2">Aspect ratio: </span>{h.aspect_ratio}</div>}
+                        {h.created_at && <div><span className="text-muted2">Created: </span>{new Date(h.created_at + "Z").toLocaleString()}</div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CollapsibleSection>
         ) : null}
 
       </div>
 
-      <div className="border-t border-border/60 px-3 py-2">
+      <div className="shrink-0 border-t border-border/60 px-3 py-2">
         <div className="flex items-center gap-2">
           <div className="flex-1" />
           <button
@@ -871,7 +1026,7 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
               "inline-flex h-8 items-center justify-center rounded-md px-3 py-0 text-[12px] font-medium transition-colors",
               generateStatus.running
                 ? "ai-generating-btn text-black"
-                : providerConfigured && (isUpscaleModel || selectedStyle)
+                : providerConfigured && (isUpscaleModel || selectedStyle || customPrompt.trim())
                   ? "bg-[rgb(var(--accent-color))] text-black hover:brightness-110"
                   : "bg-[rgb(var(--accent-color)/0.18)] text-[rgb(var(--accent-color))]",
             )}
@@ -879,7 +1034,7 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
             onClick={queueApply}
           >
             <span className="inline-flex items-center gap-1.5">
-              {generateStatus.running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : providerConfigured && (isUpscaleModel || selectedStyle) ? <Check className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {generateStatus.running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : providerConfigured && (isUpscaleModel || selectedStyle || customPrompt.trim()) ? <Check className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
               {generateStatus.running ? "Generating…" : "Generate"}
             </span>
           </button>
@@ -917,6 +1072,6 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
           onClose={() => setShowApiModal(false)}
         />
       ) : null}
-    </>
+    </div>
   );
 }

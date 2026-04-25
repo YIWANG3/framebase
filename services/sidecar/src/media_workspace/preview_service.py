@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,9 +12,11 @@ from .catalog import CatalogPaths
 from .config import DEFAULT_RAW_EXTENSIONS
 from .db import list_assets_for_preview, upsert_preview_entry
 
+_MAX_WORKERS = max((os.cpu_count() or 4) // 2, 2)
+
 KIND_SIZES = {
     "preview": 512,
-    "proxy": 1600,
+    "preview-hd": 2000,
 }
 
 
@@ -31,7 +35,7 @@ class PreviewService:
         self.catalog = catalog
 
     def output_path(self, asset_id: str, kind: str) -> Path:
-        directory = self.catalog.previews_dir if kind == "preview" else self.catalog.proxies_dir
+        directory = self.catalog.previews_dir if kind == "preview" else self.catalog.previews_hd_dir
         shard = asset_id[:2]
         target_dir = directory / shard
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -90,6 +94,9 @@ class PreviewService:
         total = len(rows)
         batch_size = 50
         report_progress(progress_callback, phase="generate_previews", processed=0, total=total, generated=0, skipped=0, failed=0)
+
+        # Split rows into skip vs work
+        to_render = []
         for row in rows:
             if row["existing_relative_path"] and row["existing_status"] == "ready" and not force:
                 skipped += 1
@@ -103,46 +110,44 @@ class PreviewService:
                     skipped=skipped,
                     failed=failed,
                 )
-                continue
-            try:
-                result = self.generate_for_row(row, kind=kind, force=force)
-                upsert_preview_entry(
-                    connection,
-                    asset_id=result.asset_id,
-                    kind=result.kind,
-                    relative_path=result.relative_path,
-                    width=result.width,
-                    height=result.height,
-                    status=result.status,
-                    commit=False,
-                )
-                generated += 1
+            else:
+                to_render.append(row)
+
+        # Parallel render
+        with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+            futures = {
+                pool.submit(self.generate_for_row, row, kind=kind, force=force): row
+                for row in to_render
+            }
+            for future in as_completed(futures):
+                row = futures[future]
+                try:
+                    result = future.result()
+                    upsert_preview_entry(
+                        connection,
+                        asset_id=result.asset_id,
+                        kind=result.kind,
+                        relative_path=result.relative_path,
+                        width=result.width,
+                        height=result.height,
+                        status=result.status,
+                        commit=False,
+                    )
+                    generated += 1
+                except Exception:
+                    upsert_preview_entry(
+                        connection,
+                        asset_id=row["asset_id"],
+                        kind=kind,
+                        relative_path="",
+                        width=None,
+                        height=None,
+                        status="failed",
+                        commit=False,
+                    )
+                    failed += 1
                 processed += 1
-                if generated % batch_size == 0:
-                    connection.commit()
-                report_progress(
-                    progress_callback,
-                    phase="generate_previews",
-                    processed=processed,
-                    total=total,
-                    generated=generated,
-                    skipped=skipped,
-                    failed=failed,
-                )
-            except Exception:
-                upsert_preview_entry(
-                    connection,
-                    asset_id=row["asset_id"],
-                    kind=kind,
-                    relative_path="",
-                    width=None,
-                    height=None,
-                    status="failed",
-                    commit=False,
-                )
-                failed += 1
-                processed += 1
-                if failed % batch_size == 0:
+                if processed % batch_size == 0:
                     connection.commit()
                 report_progress(
                     progress_callback,

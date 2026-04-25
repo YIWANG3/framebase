@@ -47,25 +47,29 @@ def _build_import_phases(mode: str, has_raw_dirs: bool, has_export_dirs: bool) -
     if mode == "processed_only":
         phases = [{"key": "index_processed_media", "label": "Index Processed Media", "progress": 0.5}]
         if has_export_dirs:
-            phases.append({"key": "generate_previews", "label": "Generate Previews", "progress": 1.0})
+            phases.append({"key": "generate_previews", "label": "Generate Previews", "progress": 0.75})
+            phases.append({"key": "generate_previews_hd", "label": "Generate HD Previews", "progress": 1.0})
         return phases
     if mode == "processed_with_sources":
         phases = [{"key": "match_processed_media", "label": "Match Processed Media", "progress": 0.5}]
         if has_export_dirs:
-            phases.append({"key": "generate_previews", "label": "Generate Previews", "progress": 1.0})
+            phases.append({"key": "generate_previews", "label": "Generate Previews", "progress": 0.75})
+            phases.append({"key": "generate_previews_hd", "label": "Generate HD Previews", "progress": 1.0})
         return phases
     if mode == "source_with_media":
-        phases = [{"key": "scan_sources", "label": "Index Sources", "progress": 1 / 3}]
+        phases = [{"key": "scan_sources", "label": "Index Sources", "progress": 1 / 4}]
         if has_export_dirs:
-            phases.append({"key": "match_processed_media", "label": "Match Processed Media", "progress": 2 / 3})
-            phases.append({"key": "generate_previews", "label": "Generate Previews", "progress": 1.0})
+            phases.append({"key": "match_processed_media", "label": "Match Processed Media", "progress": 2 / 4})
+            phases.append({"key": "generate_previews", "label": "Generate Previews", "progress": 3 / 4})
+            phases.append({"key": "generate_previews_hd", "label": "Generate HD Previews", "progress": 1.0})
         return phases
     phases: list[dict[str, object]] = []
     if has_raw_dirs:
-        phases.append({"key": "scan_sources", "label": "Index Sources", "progress": 1 / 3})
+        phases.append({"key": "scan_sources", "label": "Index Sources", "progress": 1 / 4})
     if has_export_dirs:
-        phases.append({"key": "match_processed_media", "label": "Match Processed Media", "progress": 2 / 3 if has_raw_dirs else 0.5})
-        phases.append({"key": "generate_previews", "label": "Generate Previews", "progress": 1.0})
+        phases.append({"key": "match_processed_media", "label": "Match Processed Media", "progress": 2 / 4 if has_raw_dirs else 0.5})
+        phases.append({"key": "generate_previews", "label": "Generate Previews", "progress": 3 / 4 if has_raw_dirs else 0.75})
+        phases.append({"key": "generate_previews_hd", "label": "Generate HD Previews", "progress": 1.0})
     return phases
 
 
@@ -261,6 +265,50 @@ def run_import_job(
                 paths=export_dirs,
             )
             phase_results.append(_phase_result(preview_phase, preview_result))
+            phase_cursor += 1
+
+        if phase_cursor < len(phases) and phases[phase_cursor]["key"] == "generate_previews_hd":
+            preview_hd_phase = phases[phase_cursor]
+            update_job(
+                connection,
+                job_id,
+                payload={
+                    **payload,
+                    "phase": preview_hd_phase["key"],
+                    "phase_label": preview_hd_phase["label"],
+                    "phase_index": phase_cursor + 1,
+                },
+                result={"phase_results": phase_results, "current_phase": None},
+                progress=(phase_cursor / len(phases)),
+            )
+
+            def preview_hd_progress(update: dict[str, int | str]) -> None:
+                phase_fraction = _fraction(int(update.get("processed", 0)), int(update.get("total", 0)))
+                update_job(
+                    connection,
+                    job_id,
+                    payload={
+                        **payload,
+                        "phase": preview_hd_phase["key"],
+                        "phase_label": preview_hd_phase["label"],
+                        "phase_index": phase_cursor + 1,
+                    },
+                    result={
+                        "phase_results": phase_results,
+                        "current_phase": _phase_result(preview_hd_phase, update),
+                    },
+                    progress=(phase_cursor + phase_fraction) / len(phases),
+                    commit=True,
+                )
+
+            preview_hd_result = PreviewService(ensure_catalog(catalog_path)).generate_batch(
+                connection,
+                kind="preview-hd",
+                asset_type="export",
+                progress_callback=preview_hd_progress,
+                paths=export_dirs,
+            )
+            phase_results.append(_phase_result(preview_hd_phase, preview_hd_result))
         result = {"phase_results": phase_results, "current_phase": None}
         update_job(
             connection,
@@ -569,6 +617,17 @@ def run_ai_repaint_job(
                 preview_result.width,
                 preview_result.height,
                 preview_result.status,
+                commit=True,
+            )
+            preview_hd_result = preview_service.generate_for_row(row, kind="preview-hd", force=False)
+            upsert_preview_entry(
+                connection,
+                asset_id,
+                "preview-hd",
+                preview_hd_result.relative_path,
+                preview_hd_result.width,
+                preview_hd_result.height,
+                preview_hd_result.status,
                 commit=True,
             )
 

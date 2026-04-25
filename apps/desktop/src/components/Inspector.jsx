@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, Star, Copy } from "lucide-react";
+import { ChevronRight, Star, Copy, Layers } from "lucide-react";
 import { fileName, escapePathLabel, formatBytes, formatTimestamp, localFileUrl, formatShutterSpeed, formatAperture, formatFocalLength, formatISO } from "../utils/format";
 
 function StarRating({ value = 0, onChange }) {
@@ -57,7 +57,35 @@ function formatGPS(lat, lon) {
   return `${Math.abs(lat).toFixed(4)}° ${latDir}, ${Math.abs(lon).toFixed(4)}° ${lonDir}`;
 }
 
-export default function Inspector({ detail, onRatingChange }) {
+function ThumbnailStrip({ items, icon: Icon, onSelect }) {
+  if (!items?.length) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1">
+      {items.map((item) => (
+        <button
+          key={item.asset_id}
+          type="button"
+          className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-black transition-all hover:ring-2 hover:ring-accent/50"
+          onClick={() => onSelect?.(item.asset_id)}
+          title={item.stem}
+        >
+          {item.preview_path ? (
+            <img src={localFileUrl(item.preview_path)} alt={item.stem} className="h-full w-full object-cover" loading="lazy" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-[8px] text-muted2">—</div>
+          )}
+          {Icon ? (
+            <div className="absolute bottom-0.5 right-0.5 rounded bg-black/50 p-0.5">
+              <Icon className="h-2 w-2 text-white/60" />
+            </div>
+          ) : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function Inspector({ detail, onRatingChange, onSelectAsset }) {
   const [localRating, setLocalRating] = useState(null);
   const currentAssetId = detail?.asset_id || detail?.export_path || null;
 
@@ -117,18 +145,30 @@ export default function Inspector({ detail, onRatingChange }) {
         <div className="px-0.5">
           <h2 className="text-[13px] font-medium leading-tight text-text">{exportName || detail.stem}</h2>
 
-          <div className="mt-3 flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted2">Rating</span>
-            <StarRating
-              value={rating}
-              onChange={(next) => {
-                setLocalRating(next);
-                onRatingChange?.(next);
-              }}
-            />
-          </div>
+          {detail.collage_sources?.length > 0 ? (
+            <div className="mt-2">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted2">Source Images</div>
+              <ThumbnailStrip items={detail.collage_sources} onSelect={onSelectAsset} />
+            </div>
+          ) : null}
+
+          {detail.version_siblings?.length > 0 ? (
+            <div className="mt-2">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted2">Other Versions</div>
+              <ThumbnailStrip items={detail.version_siblings} onSelect={onSelectAsset} />
+            </div>
+          ) : null}
 
           <Section title="Properties">
+            <DetailRow label="Rating">
+              <StarRating
+                value={rating}
+                onChange={(next) => {
+                  setLocalRating(next);
+                  onRatingChange?.(next);
+                }}
+              />
+            </DetailRow>
             <DetailRow label="Dimensions">{dimensions}</DetailRow>
             <DetailRow label="Size">{fileSize}</DetailRow>
             <DetailRow label="Type">{formatValue}</DetailRow>
@@ -208,6 +248,7 @@ export default function Inspector({ detail, onRatingChange }) {
               </div>
             </Section>
           ) : null}
+
         </div>
       </div>
     </aside>

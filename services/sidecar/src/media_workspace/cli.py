@@ -4,6 +4,7 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from .benchmark import benchmark_dataset
 from .catalog import ensure_catalog
@@ -170,7 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--manual-threshold", type=float, default=0.7)
 
     previews = subparsers.add_parser("generate-previews", parents=[common])
-    previews.add_argument("--kind", choices=["preview", "proxy"], default="preview")
+    previews.add_argument("--kind", choices=["preview", "preview-hd"], default="preview")
     previews.add_argument("--asset-type", choices=["raw", "export"])
     previews.add_argument("--limit", type=int)
     previews.add_argument("--force", action="store_true")
@@ -229,6 +230,13 @@ def build_parser() -> argparse.ArgumentParser:
     quick_reg = subparsers.add_parser("quick-register", parents=[common])
     quick_reg.add_argument("--export-path", type=Path, required=True)
     quick_reg.add_argument("--origin-path", type=Path, default=None)
+    quick_reg.add_argument("--collage-source-ids", nargs="*", default=None)
+
+    collage_src = subparsers.add_parser("collage-sources", parents=[common])
+    collage_src.add_argument("--asset-id", required=True)
+
+    repaint_history = subparsers.add_parser("list-repaint-history", parents=[common])
+    repaint_history.add_argument("--asset-path", type=Path, required=True)
 
     delete_export = subparsers.add_parser("delete-export-assets", parents=[common])
     delete_export.add_argument("--asset-id", action="append", required=True)
@@ -269,7 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_preview_job_parser = subparsers.add_parser("run-preview-job", parents=[common])
     run_preview_job_parser.add_argument("--job-id", required=True)
-    run_preview_job_parser.add_argument("--kind", choices=["preview", "proxy"], default="preview")
+    run_preview_job_parser.add_argument("--kind", choices=["preview", "preview-hd"], default="preview")
     run_preview_job_parser.add_argument("--asset-type", choices=["raw", "export"])
     run_preview_job_parser.add_argument("--limit", type=int)
     run_preview_job_parser.add_argument("--force", action="store_true")
@@ -689,6 +697,9 @@ def main() -> int:
             preview_path = None
             if row["preview_relative_path"]:
                 preview_path = str((catalog.root / row["preview_relative_path"]).resolve())
+            preview_hd_path = None
+            if row["preview_hd_relative_path"]:
+                preview_hd_path = str((catalog.root / row["preview_hd_relative_path"]).resolve())
             payload.append(
                 {
                     "asset_id": row["asset_id"],
@@ -703,6 +714,7 @@ def main() -> int:
                     "raw_path": row["raw_path"],
                     "raw_metadata": json.loads(row["raw_metadata_json"] or "{}") if row["raw_metadata_json"] else {},
                     "preview_path": preview_path,
+                    "preview_hd_path": preview_hd_path,
                     "resource_set_id": row["resource_set_id"],
                     "resource_role": row["resource_role"],
                     "version_kind": row["version_kind"],
@@ -746,6 +758,9 @@ def main() -> int:
             "raw_preview_path": str((catalog.root / row["raw_preview_relative_path"]).resolve())
             if row["raw_preview_relative_path"]
             else None,
+            "export_preview_hd_path": str((catalog.root / row["export_preview_hd_relative_path"]).resolve())
+            if row["export_preview_hd_relative_path"]
+            else None,
             "resource_set_id": row["resource_set_id"],
             "resource_role": row["resource_role"],
             "version_kind": row["version_kind"],
@@ -759,6 +774,93 @@ def main() -> int:
                 for d in duplicates
             ],
         }
+
+        # Add version siblings from resource set
+        asset_id = row["asset_id"]
+        set_id = row["resource_set_id"]
+        if set_id:
+            siblings = connection.execute(
+                """
+                SELECT rsi.asset_id, rsi.role, rsi.version_kind, rsi.sort_order,
+                       a.stem, a.canonical_path,
+                       af.path AS export_path,
+                       pe.relative_path AS preview_relative_path
+                FROM resource_set_items rsi
+                JOIN assets a ON a.asset_id = rsi.asset_id
+                LEFT JOIN asset_files af ON af.asset_id = rsi.asset_id AND af.role = 'canonical'
+                LEFT JOIN preview_entries pe ON pe.asset_id = rsi.asset_id AND pe.kind = 'preview'
+                WHERE rsi.set_id = ? AND rsi.asset_id != ?
+                ORDER BY rsi.sort_order
+                """,
+                (set_id, asset_id),
+            ).fetchall()
+            payload["version_siblings"] = [
+                {
+                    "asset_id": s["asset_id"],
+                    "role": s["role"],
+                    "version_kind": s["version_kind"],
+                    "stem": s["stem"],
+                    "export_path": s["export_path"],
+                    "preview_path": str((catalog.root / s["preview_relative_path"]).resolve())
+                    if s["preview_relative_path"] else None,
+                }
+                for s in siblings
+            ]
+        else:
+            payload["version_siblings"] = []
+
+        # Add collage relationships
+        collage_sources = connection.execute(
+            """
+            SELECT al.child_asset_id AS source_asset_id,
+                   json_extract(al.recipe_json, '$.sort_order') AS sort_order,
+                   a.stem,
+                   af.path AS export_path,
+                   pe.relative_path AS preview_relative_path
+            FROM asset_links al
+            JOIN assets a ON a.asset_id = al.child_asset_id
+            LEFT JOIN asset_files af ON af.asset_id = al.child_asset_id AND af.role = 'canonical'
+            LEFT JOIN preview_entries pe ON pe.asset_id = al.child_asset_id AND pe.kind = 'preview'
+            WHERE al.parent_asset_id = ? AND al.relation_type = 'collage_source'
+            ORDER BY json_extract(al.recipe_json, '$.sort_order')
+            """,
+            (asset_id,),
+        ).fetchall()
+        payload["collage_sources"] = [
+            {
+                "asset_id": s["source_asset_id"],
+                "stem": s["stem"],
+                "export_path": s["export_path"],
+                "preview_path": str((catalog.root / s["preview_relative_path"]).resolve())
+                if s["preview_relative_path"] else None,
+            }
+            for s in collage_sources
+        ]
+
+        used_in_collages = connection.execute(
+            """
+            SELECT al.parent_asset_id AS collage_asset_id,
+                   a.stem,
+                   af.path AS export_path,
+                   pe.relative_path AS preview_relative_path
+            FROM asset_links al
+            JOIN assets a ON a.asset_id = al.parent_asset_id
+            LEFT JOIN asset_files af ON af.asset_id = al.parent_asset_id AND af.role = 'canonical'
+            LEFT JOIN preview_entries pe ON pe.asset_id = al.parent_asset_id AND pe.kind = 'preview'
+            WHERE al.child_asset_id = ? AND al.relation_type = 'collage_source'
+            """,
+            (asset_id,),
+        ).fetchall()
+        payload["used_in_collages"] = [
+            {
+                "asset_id": s["collage_asset_id"],
+                "stem": s["stem"],
+                "export_path": s["export_path"],
+                "preview_path": str((catalog.root / s["preview_relative_path"]).resolve())
+                if s["preview_relative_path"] else None,
+            }
+            for s in used_in_collages
+        ]
         print(json.dumps(payload, indent=2))
         return 0
 
@@ -779,6 +881,43 @@ def main() -> int:
     if args.command == "confirm-match":
         confirm_match(connection, args.export_path, args.raw_asset_id)
         print(f"confirmed {args.export_path} -> {args.raw_asset_id}")
+        return 0
+
+    if args.command == "list-repaint-history":
+        from .db import list_repaint_history
+        history = list_repaint_history(connection, str(args.asset_path.resolve()))
+        print(json.dumps(history, ensure_ascii=False))
+        return 0
+
+    if args.command == "collage-sources":
+        # Get sources if this asset is a collage
+        sources = connection.execute(
+            """
+            SELECT al.child_asset_id AS source_asset_id,
+                   json_extract(al.recipe_json, '$.sort_order') AS sort_order,
+                   a.stem, a.canonical_path
+            FROM asset_links al
+            JOIN assets a ON a.asset_id = al.child_asset_id
+            WHERE al.parent_asset_id = ? AND al.relation_type = 'collage_source'
+            ORDER BY json_extract(al.recipe_json, '$.sort_order')
+            """,
+            (args.asset_id,),
+        ).fetchall()
+        # Get collages that use this asset as a source
+        used_in = connection.execute(
+            """
+            SELECT al.parent_asset_id AS collage_asset_id,
+                   a.stem, a.canonical_path
+            FROM asset_links al
+            JOIN assets a ON a.asset_id = al.parent_asset_id
+            WHERE al.child_asset_id = ? AND al.relation_type = 'collage_source'
+            """,
+            (args.asset_id,),
+        ).fetchall()
+        print(json.dumps({
+            "sources": [dict(r) for r in sources],
+            "used_in_collages": [dict(r) for r in used_in],
+        }, ensure_ascii=False))
         return 0
 
     if args.command == "quick-register":
@@ -832,13 +971,24 @@ def main() -> int:
             )
             upsert_registry(connection, reg_decision, commit=True)
 
-        attach_asset_to_resource_set(
-            connection,
-            asset_id,
-            origin_asset_id=origin_asset_id,
-            version_kind="derived" if origin_asset_id else "import",
-            commit=True,
-        )
+        collage_source_ids = getattr(args, 'collage_source_ids', None) or []
+        if collage_source_ids:
+            # Collage gets its own resource set, not joined to any source's set
+            attach_asset_to_resource_set(
+                connection,
+                asset_id,
+                origin_asset_id=None,
+                version_kind="import",
+                commit=True,
+            )
+        else:
+            attach_asset_to_resource_set(
+                connection,
+                asset_id,
+                origin_asset_id=origin_asset_id,
+                version_kind="derived" if origin_asset_id else "import",
+                commit=True,
+            )
 
         # Generate preview for this single asset
         preview_service = PreviewService(catalog)
@@ -856,10 +1006,25 @@ def main() -> int:
                 from .db import upsert_preview_entry
                 preview_result = preview_service.generate_for_row(row, kind="preview", force=False)
                 upsert_preview_entry(connection, asset_id, "preview", preview_result.relative_path, preview_result.width, preview_result.height, preview_result.status)
+                preview_hd_result = preview_service.generate_for_row(row, kind="preview-hd", force=False)
+                upsert_preview_entry(connection, asset_id, "preview-hd", preview_hd_result.relative_path, preview_hd_result.width, preview_hd_result.height, preview_hd_result.status)
                 connection.commit()
             except Exception as e:
                 import sys
                 print(f"Warning: preview generation failed: {e}", file=sys.stderr)
+
+        # Record collage source relationships
+        if collage_source_ids:
+            for idx, source_id in enumerate(collage_source_ids):
+                connection.execute(
+                    """
+                    INSERT INTO asset_links (link_id, parent_asset_id, child_asset_id, relation_type, recipe_json, confidence)
+                    VALUES (?, ?, ?, 'collage_source', ?, 1.0)
+                    ON CONFLICT(parent_asset_id, child_asset_id, relation_type) DO NOTHING
+                    """,
+                    (str(uuid4()), asset_id, source_id, json.dumps({"sort_order": idx})),
+                )
+            connection.commit()
 
         print(json.dumps({
             "asset_id": asset_id,
@@ -982,6 +1147,9 @@ def main() -> int:
             preview_path = None
             if row["preview_relative_path"]:
                 preview_path = str((catalog.root / row["preview_relative_path"]).resolve())
+            preview_hd_path = None
+            if row["preview_hd_relative_path"]:
+                preview_hd_path = str((catalog.root / row["preview_hd_relative_path"]).resolve())
             payload.append(
                 {
                     "asset_id": row["asset_id"],
@@ -996,6 +1164,7 @@ def main() -> int:
                     "raw_path": row["raw_path"],
                     "raw_metadata": json.loads(row["raw_metadata_json"] or "{}") if row["raw_metadata_json"] else {},
                     "preview_path": preview_path,
+                    "preview_hd_path": preview_hd_path,
                     "resource_set_id": row["resource_set_id"],
                     "resource_role": row["resource_role"],
                     "version_kind": row["version_kind"],

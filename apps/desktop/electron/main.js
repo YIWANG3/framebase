@@ -564,13 +564,13 @@ function startImportTask(options) {
   return formatJobStatus(job);
 }
 
-function startPreviewTask() {
+function startPreviewTask(kind = "preview") {
   const current = latestJobStatus("preview");
   if (current.running) {
     return current;
   }
-  const job = createJob("preview", { kind: "preview", asset_type: "export" });
-  launchSidecarJob(["run-preview-job", "--job-id", job.job_id, "--kind", "preview", "--asset-type", "export"]);
+  const job = createJob("preview", { kind, asset_type: "export" });
+  launchSidecarJob(["run-preview-job", "--job-id", job.job_id, "--kind", kind, "--asset-type", "export"]);
   return formatJobStatus(job);
 }
 
@@ -797,7 +797,7 @@ ipcMain.handle("workspace:enrich-start", () => startEnrichmentTask());
 
 ipcMain.handle("workspace:preview-status", () => latestJobStatus("preview"));
 
-ipcMain.handle("workspace:preview-start", () => startPreviewTask());
+ipcMain.handle("workspace:preview-start", (_event, kind) => startPreviewTask(kind || "preview"));
 
 ipcMain.handle("workspace:ai-repaint-status", () => latestJobStatus("ai_repaint"));
 
@@ -832,6 +832,11 @@ ipcMain.handle("workspace:get-ai-styles", () => {
 
 ipcMain.handle("workspace:save-ai-styles", async (_event, styles) => {
   await updateAppSettings((settings) => ({ ...settings, aiStyles: styles }));
+});
+
+ipcMain.handle("workspace:list-repaint-history", async (_event, assetPath) => {
+  if (!assetPath) return [];
+  return await callSidecarJsonAsync(["list-repaint-history", "--asset-path", String(assetPath)]) || [];
 });
 
 ipcMain.handle("workspace:get-ai-provider-token", async (_event, provider) => {
@@ -1060,11 +1065,19 @@ ipcMain.handle("workspace:process-and-save", async (_event, options) => {
   }
 });
 
-ipcMain.handle("workspace:quick-register", async (_event, exportPath, originPath) => {
+ipcMain.handle("workspace:quick-register", async (_event, exportPath, originPath, collageSourceIds) => {
   if (!exportPath) return null;
   const command = ["quick-register", "--export-path", exportPath];
   if (originPath) command.push("--origin-path", originPath);
+  if (Array.isArray(collageSourceIds) && collageSourceIds.length) {
+    command.push("--collage-source-ids", ...collageSourceIds);
+  }
   return await callSidecarJsonAsync(command);
+});
+
+ipcMain.handle("workspace:collage-sources", async (_event, assetId) => {
+  if (!assetId) return { sources: [], used_in_collages: [] };
+  return await callSidecarJsonAsync(["collage-sources", "--asset-id", assetId]);
 });
 
 ipcMain.handle("workspace:delete-export-assets", async (_event, assetIds) => {

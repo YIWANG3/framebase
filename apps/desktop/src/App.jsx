@@ -9,6 +9,8 @@ import Inspector from "./components/Inspector";
 import ImportOverlay from "./components/ImportOverlay";
 import Lightbox from "./components/Lightbox";
 import EditorOverlay from "./components/EditorOverlay";
+import BeforeAfterCompare from "./components/editor/BeforeAfterCompare";
+import CollageOverlay from "./components/CollageOverlay";
 import DesignSystemPanel from "./components/DesignSystemPanel";
 
 export default function App() {
@@ -16,7 +18,6 @@ export default function App() {
   const [showSidebar] = useState(true);
   const [showInspector] = useState(true);
   const [displayMode, setDisplayMode] = useState("grid");
-  const [versionMode, setVersionMode] = useState("primary");
   const [thumbSize, setThumbSize] = useState(180);
   const [history, setHistory] = useState(["all"]);
   const [historyIndex, setHistoryIndex] = useState(0);
@@ -26,15 +27,11 @@ export default function App() {
   const [layoutItems, setLayoutItems] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectionAnchorId, setSelectionAnchorId] = useState(null);
+  const [compareState, setCompareState] = useState(null);
+  const [collageItems, setCollageItems] = useState(null);
   const resizeSidebar = usePaneResize(workspace.setSidebarWidth, 200, 360);
   const resizeInspector = usePaneResize((value) => workspace.setInspectorWidth(-value), -420, -240);
-  const currentItems = useMemo(
-    () =>
-      versionMode === "all_versions"
-        ? workspace.filteredItems
-        : workspace.filteredItems.filter((item) => item.resource_role === "primary" || !item.resource_set_id),
-    [workspace.filteredItems, versionMode],
-  );
+  const currentItems = workspace.filteredItems;
   const orderedIds = useMemo(() => currentItems.map((item) => item.asset_id), [currentItems]);
   const itemById = useMemo(
     () => new Map(currentItems.map((item) => [item.asset_id, item])),
@@ -283,6 +280,21 @@ export default function App() {
     setEditorItem(nextItem);
   }
 
+  function handleCompare(assetIds) {
+    if (assetIds?.length !== 2) return;
+    const a = itemById.get(assetIds[0]);
+    const b = itemById.get(assetIds[1]);
+    if (!a?.export_path || !b?.export_path) return;
+    setCompareState({ beforePath: a.export_path, afterPath: b.export_path, layout: "side" });
+  }
+
+  function handleCollage(assetIds) {
+    if (!assetIds?.length || assetIds.length < 2) return;
+    const items = assetIds.map((id) => itemById.get(id)).filter(Boolean);
+    if (items.length < 2) return;
+    setCollageItems(items);
+  }
+
   useEffect(() => {
     if (!workspace.selectedAssetId) {
       setLightboxOpen(false);
@@ -433,8 +445,6 @@ export default function App() {
             canGoForward={historyIndex < history.length - 1}
             displayMode={displayMode}
             setDisplayMode={setDisplayMode}
-            versionMode={versionMode}
-            setVersionMode={setVersionMode}
             thumbSize={thumbSize}
             setThumbSize={setThumbSize}
           />
@@ -464,12 +474,13 @@ export default function App() {
                 onRemoveFromCollection={workspace.removeFromCollection}
                 onDeleteFromCatalog={workspace.deleteExportAssets}
                 onEdit={openEditor}
-                versionMode={versionMode}
+                onCompare={handleCompare}
+                onCollage={handleCollage}
               />
           </div>
         </section>
 
-        {showInspector ? <Inspector detail={workspace.detail} onRatingChange={applyRating} /> : <div className="bg-chrome" />}
+        {showInspector ? <Inspector detail={workspace.detail} onRatingChange={applyRating} onSelectAsset={selectSingle} /> : <div className="bg-chrome" />}
 
         {showSidebar ? (
           <div
@@ -510,6 +521,24 @@ export default function App() {
         item={editorItem}
         onClose={() => setEditorItem(null)}
         onSaveComplete={async () => {
+          await workspace.refreshAll?.();
+        }}
+      />
+      {compareState && (
+        <BeforeAfterCompare
+          beforePath={compareState.beforePath}
+          afterPath={compareState.afterPath}
+          layout={compareState.layout || "side"}
+          onClose={() => setCompareState(null)}
+          onLayoutChange={(layout) => setCompareState((s) => s ? { ...s, layout } : s)}
+        />
+      )}
+      <CollageOverlay
+        open={!!collageItems}
+        items={collageItems}
+        collections={workspace.collections}
+        onClose={() => setCollageItems(null)}
+        onExportComplete={async () => {
           await workspace.refreshAll?.();
         }}
       />

@@ -74,8 +74,6 @@ export default function Toolbar({
   canGoForward,
   displayMode,
   setDisplayMode,
-  versionMode,
-  setVersionMode,
   thumbSize,
   setThumbSize,
 }) {
@@ -162,15 +160,6 @@ export default function Toolbar({
           </IconButton>
         ))}
       </div>
-
-      <select
-        value={versionMode}
-        onChange={(e) => setVersionMode(e.target.value)}
-        className="ml-1 h-8 cursor-pointer rounded-md border border-border/70 bg-app px-2 py-0 text-[12px] text-text outline-none hover:border-border focus:border-accent/50"
-      >
-        <option value="primary">Main Only</option>
-        <option value="all_versions">All Versions</option>
-      </select>
 
       <label className="relative">
         <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />

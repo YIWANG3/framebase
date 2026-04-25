@@ -1577,7 +1577,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
               </div>
             ) : null}
             {/* Always mounted so data loads when editor opens, hidden when not active */}
-            <div className={tool === "ai" ? undefined : "hidden"}>
+            <div className={tool === "ai" ? "flex max-h-[calc(100vh-10rem)] flex-col" : "hidden"}>
               <AiRepaintPanel sourcePath={sourcePath} sourceLabel={sourceLabel} onCompareChange={setCompareState} compareState={compareState} onRepaintComplete={onSaveComplete} />
             </div>
           </div>
