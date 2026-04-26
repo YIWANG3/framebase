@@ -135,7 +135,7 @@ function MenuItem({ icon: Icon, label, shortcut, onClick, children }) {
           <ChevronRight className="h-3 w-3 text-muted2" />
         </button>
         {subOpen && (
-          <div className="absolute left-full top-0 z-50 ml-1 min-w-[160px] rounded-md border border-border/60 bg-chrome py-1 shadow-xl">
+          <div className="absolute left-full top-0 z-50 ml-1 min-w-[160px] rounded-md border border-border/60 bg-chrome py-1 shadow-menu">
             {children}
           </div>
         )}
@@ -199,7 +199,7 @@ function ContextMenu({ x, y, item, assetIds, collections, activeCollectionId, on
   return createPortal(
     <div
       ref={(el) => { ref.current = el; menuRef.current = el; }}
-      className="fixed z-[12000] min-w-[200px] rounded-md border border-border/60 bg-chrome py-1 shadow-xl"
+      className="fixed z-[12000] min-w-[200px] rounded-md border border-border/60 bg-chrome py-1 shadow-menu"
       style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
     >
       <MenuItem icon={Pencil} label="Edit…" shortcut="E" onClick={() => { onEdit?.(item.export_path); onClose(); }} />

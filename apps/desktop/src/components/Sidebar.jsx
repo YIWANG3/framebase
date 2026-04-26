@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { Images, CircleCheck, CircleX, FolderPlus, Folder, Trash2, Pencil } from "lucide-react";
+import { Images, Clock, Star, Link, FolderPlus, Folder, Trash2, Pencil } from "lucide-react";
 import { baseName, formatTimestamp, navItems } from "../utils/format";
 
-const ICON_MAP = { Archive: Images, Circle: CircleCheck, Tag: CircleX };
+const ICON_MAP = { Archive: Images, Clock, Star, Link };
 
 function InlineEdit({ initial, onConfirm, onCancel }) {
   const ref = useRef(null);

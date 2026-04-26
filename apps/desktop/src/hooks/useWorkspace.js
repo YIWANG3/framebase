@@ -154,7 +154,7 @@ export default function useWorkspace() {
           progressNote(previewTask),
           progressNote(enrichmentTask),
           queuedRawCount || queuedExportCount
-            ? `Queued changes: ${queuedExportCount} processed media · ${queuedRawCount} sources`
+            ? `Queued changes: ${queuedExportCount} media · ${queuedRawCount} sources`
             : "",
           importTask?.error || previewTask?.error || enrichmentTask?.error || "",
         ].filter(Boolean),

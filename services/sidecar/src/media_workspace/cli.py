@@ -177,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     previews.add_argument("--force", action="store_true")
 
     browse = subparsers.add_parser("browse-exports", parents=[common])
-    browse.add_argument("--status", choices=["all", "matched", "unmatched"], required=True)
+    browse.add_argument("--status", choices=["all", "matched", "unmatched", "rated", "recent"], required=True)
     browse.add_argument("--limit", type=int, default=120)
     browse.add_argument("--offset", type=int, default=0)
     browse.add_argument("--search", default=None)
@@ -297,7 +297,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_ai_repaint_job_parser = subparsers.add_parser("run-ai-repaint-job", parents=[common])
     run_ai_repaint_job_parser.add_argument("--job-id", required=True)
-    run_ai_repaint_job_parser.add_argument("--provider", choices=["nanobanana", "openai", "jimeng", "mock"], default="nanobanana")
+    run_ai_repaint_job_parser.add_argument("--provider", choices=["nanobanana", "openai", "openai_compatible", "jimeng", "mock"], default="nanobanana")
+    run_ai_repaint_job_parser.add_argument("--base-url")
     run_ai_repaint_job_parser.add_argument("--model")
     run_ai_repaint_job_parser.add_argument("--input", type=Path, required=True)
     run_ai_repaint_job_parser.add_argument("--output", type=Path, required=True)
@@ -312,8 +313,9 @@ def build_parser() -> argparse.ArgumentParser:
     summary_parser.add_argument("--json", action="store_true")
 
     list_models_parser = subparsers.add_parser("list-ai-models", parents=[common])
-    list_models_parser.add_argument("--provider", choices=["nanobanana", "openai", "jimeng"], default="nanobanana")
+    list_models_parser.add_argument("--provider", choices=["nanobanana", "openai", "openai_compatible", "jimeng"], default="nanobanana")
     list_models_parser.add_argument("--api-key")
+    list_models_parser.add_argument("--base-url")
 
     repaint = subparsers.add_parser("ai-repaint", parents=[common])
     repaint.add_argument("--provider", choices=["nanobanana", "openai", "jimeng", "mock"], default="nanobanana")
@@ -492,7 +494,7 @@ def main() -> int:
         if not effective_key:
             print(json.dumps({"error": f"No API key for {args.provider}"}))
             return 1
-        models = list_provider_models(args.provider, effective_key)
+        models = list_provider_models(args.provider, effective_key, base_url=getattr(args, "base_url", None))
         print(json.dumps(models, indent=2))
         return 0
 
@@ -511,6 +513,7 @@ def main() -> int:
             image_size=args.image_size,
             temperature=args.temperature,
             model=getattr(args, "model", None),
+            base_url=getattr(args, "base_url", None),
         )
         print(json.dumps(payload, indent=2))
         return 0

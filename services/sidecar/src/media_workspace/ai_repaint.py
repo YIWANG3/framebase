@@ -17,6 +17,7 @@ DEFAULT_GEMINI_MODEL = "gemini-3-pro-image-preview"
 DEFAULT_OPENAI_MODEL = "gpt-image-1"
 NANOBANANA_PROVIDER = "nanobanana"
 OPENAI_PROVIDER = "openai"
+OPENAI_COMPATIBLE_PROVIDER = "openai_compatible"
 JIMENG_PROVIDER = "jimeng"
 
 JIMENG_MODELS = [
@@ -66,11 +67,11 @@ def list_gemini_models(api_key: str) -> list[dict[str, str]]:
     return results if results else GEMINI_FALLBACK_MODELS
 
 
-def list_openai_models(api_key: str) -> list[dict[str, str]]:
+def list_openai_models(api_key: str, base_url: str = OPENAI_API_BASE) -> list[dict[str, str]]:
     """Fetch OpenAI models that are image-related."""
     request = Request(
-        url=f"{OPENAI_API_BASE}/models",
-        headers={"Authorization": f"Bearer {api_key}"},
+        url=f"{base_url}/models",
+        headers={"Authorization": f"Bearer {api_key}", "User-Agent": "Framebase/1.0"},
         method="GET",
     )
     try:
@@ -82,15 +83,17 @@ def list_openai_models(api_key: str) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
     for m in body.get("data", []):
         mid = m.get("id", "")
-        if "image" in mid or "dall-e" in mid:
+        if "image" in mid or "dall-e" in mid or "gpt" in mid:
             results.append({"id": mid, "name": mid})
     return results if results else OPENAI_FALLBACK_MODELS
 
 
-def list_provider_models(provider: str, api_key: str) -> list[dict[str, str]]:
+def list_provider_models(provider: str, api_key: str, base_url: str | None = None) -> list[dict[str, str]]:
     """Return available models for a given provider."""
     if provider == OPENAI_PROVIDER:
         return list_openai_models(api_key)
+    if provider == OPENAI_COMPATIBLE_PROVIDER:
+        return list_openai_models(api_key, base_url=base_url or OPENAI_API_BASE)
     if provider == JIMENG_PROVIDER:
         return JIMENG_MODELS
     # nanobanana uses Gemini under the hood
@@ -292,6 +295,7 @@ def run_openai_repaint(
     model: str = DEFAULT_OPENAI_MODEL,
     aspect_ratio: str | None = None,
     image_size: str | None = None,
+    base_url: str = OPENAI_API_BASE,
 ) -> RepaintResult:
     effective_key = api_key or os.environ.get("OPENAI_API_KEY")
     if not effective_key:
@@ -330,11 +334,12 @@ def run_openai_repaint(
     body = b"".join(parts) + f"--{boundary}--\r\n".encode("utf-8")
 
     request = Request(
-        url=f"{OPENAI_API_BASE}/images/edits",
+        url=f"{base_url}/images/edits",
         data=body,
         headers={
             "Content-Type": f"multipart/form-data; boundary={boundary}",
             "Authorization": f"Bearer {effective_key}",
+            "User-Agent": "Framebase/1.0",
         },
         method="POST",
     )
@@ -355,11 +360,17 @@ def run_openai_repaint(
 
     item = data_items[0]
     b64 = item.get("b64_json")
-    if not b64:
-        raise RuntimeError("OpenAI response missing b64_json (ensure response_format is b64_json or default).")
-
-    output_bytes = base64.b64decode(b64)
-    output_mime = "image/png"
+    img_url = item.get("url")
+    if b64:
+        output_bytes = base64.b64decode(b64)
+        output_mime = "image/png"
+    elif img_url:
+        with urlopen(img_url, timeout=120) as dl_resp:
+            output_bytes = dl_resp.read()
+        ct = dl_resp.headers.get("Content-Type", "image/png") if hasattr(dl_resp, "headers") else "image/png"
+        output_mime = "image/jpeg" if "jpeg" in ct or "jpg" in ct else "image/png"
+    else:
+        raise RuntimeError("OpenAI response missing both b64_json and url.")
 
     written_path = _write_output_bytes(output_path, output_bytes, output_mime)
     return RepaintResult(

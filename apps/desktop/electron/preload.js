@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld("mediaWorkspace", {
   saveAiPreferences: (prefs) => ipcRenderer.invoke("workspace:save-ai-preferences", prefs),
   getAiRepaintStatus: () => ipcRenderer.invoke("workspace:ai-repaint-status"),
   startAiRepaint: (options) => ipcRenderer.invoke("workspace:ai-repaint-start", options),
-  listAiModels: (provider) => ipcRenderer.invoke("workspace:list-ai-models", provider),
+  listAiModels: (providerId, providerType) => ipcRenderer.invoke("workspace:list-ai-models", providerId, providerType),
   listRepaintHistory: (assetPath) => ipcRenderer.invoke("workspace:list-repaint-history", assetPath),
   getAiStyles: () => ipcRenderer.invoke("workspace:get-ai-styles"),
   saveAiStyles: (styles) => ipcRenderer.invoke("workspace:save-ai-styles", styles),

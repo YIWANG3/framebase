@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .ai_repaint import DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_JIMENG_MODEL, OPENAI_PROVIDER, JIMENG_PROVIDER, run_mock_repaint, run_nanobanana_repaint, run_openai_repaint, run_jimeng_repaint
+from .ai_repaint import DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_JIMENG_MODEL, OPENAI_PROVIDER, OPENAI_COMPATIBLE_PROVIDER, JIMENG_PROVIDER, run_mock_repaint, run_nanobanana_repaint, run_openai_repaint, run_jimeng_repaint
 from .catalog import ensure_catalog
 from .config import Thresholds
 from .db import (
@@ -470,6 +470,7 @@ def run_ai_repaint_job(
     image_size: str | None = None,
     temperature: float | None = None,
     model: str | None = None,
+    base_url: str | None = None,
 ) -> dict[str, object]:
     payload = {
         "provider": provider,
@@ -531,6 +532,17 @@ def run_ai_repaint_job(
                     model=model or DEFAULT_OPENAI_MODEL,
                     aspect_ratio=aspect_ratio,
                     image_size=image_size,
+                )
+            elif provider == OPENAI_COMPATIBLE_PROVIDER:
+                result = run_openai_repaint(
+                    input_path=input_path,
+                    output_path=output_path,
+                    prompt=prompt,
+                    api_key=effective_api_key,
+                    model=model or DEFAULT_OPENAI_MODEL,
+                    aspect_ratio=aspect_ratio,
+                    image_size=image_size,
+                    base_url=base_url or "https://api.openai.com/v1",
                 )
             else:
                 result = run_nanobanana_repaint(

@@ -76,8 +76,8 @@ export function formatPercent(value) {
 }
 
 export function statusLabel(status) {
-  if (status === "auto_bound" || status === "manual_confirmed") return "Matched";
-  if (status === "unmatched") return "Unmatched";
+  if (status === "auto_bound" || status === "manual_confirmed") return "With Raw";
+  if (status === "unmatched") return "Standalone";
   return "Unknown";
 }
 
@@ -113,8 +113,9 @@ export function formatISO(value) {
 }
 
 export function filterTitle(status) {
-  if (status === "matched") return "Matched";
-  if (status === "unmatched") return "Unmatched";
+  if (status === "matched") return "With Raw";
+  if (status === "recent") return "Recently Added";
+  if (status === "rated") return "Rated";
   return "All Assets";
 }
 
@@ -156,11 +157,17 @@ export function progressNote(task) {
 }
 
 export function navItems(summary) {
-  return [
+  const items = [
     { key: "all", label: "All Assets", count: summary?.export_assets ?? 0, icon: "Archive" },
-    { key: "matched", label: "Matched", count: summary?.confirmed_matches ?? 0, icon: "Circle" },
-    { key: "unmatched", label: "Unmatched", count: summary?.unmatched_exports ?? 0, icon: "Tag" },
+    { key: "recent", label: "Recently Added", count: summary?.recently_added_count ?? 0, icon: "Clock" },
   ];
+  if (Number(summary?.rated_count ?? 0) > 0) {
+    items.push({ key: "rated", label: "Rated", count: summary?.rated_count ?? 0, icon: "Star" });
+  }
+  if (Number(summary?.raw_assets ?? 0) > 0) {
+    items.push({ key: "matched", label: "With Raw", count: summary?.confirmed_matches ?? 0, icon: "Link" });
+  }
+  return items;
 }
 
 export function galleryInfoLabel(item) {

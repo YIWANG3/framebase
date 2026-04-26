@@ -505,7 +505,6 @@ export default function App() {
       <Lightbox
         open={lightboxOpen}
         items={currentItems}
-        allItems={workspace.filteredItems}
         currentIndex={Math.max(selectedIndex, 0)}
         proofMode={proofMode}
         onToggleProof={() => setProofMode((current) => !current)}
@@ -537,6 +536,7 @@ export default function App() {
         open={!!collageItems}
         items={collageItems}
         collections={workspace.collections}
+        summary={workspace.summary}
         onClose={() => setCollageItems(null)}
         onExportComplete={async () => {
           await workspace.refreshAll?.();

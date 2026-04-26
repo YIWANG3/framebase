@@ -57,7 +57,6 @@ function formatPercent(scale) {
 export default function Lightbox({
   open,
   items,
-  allItems,
   currentIndex,
   proofMode,
   onToggleProof,
@@ -80,11 +79,9 @@ export default function Lightbox({
   const [loadState, setLoadState] = useState("loading");
   const [showLoadingText, setShowLoadingText] = useState(false);
   const [sourceIndex, setSourceIndex] = useState(0);
-  const [versionOverride, setVersionOverride] = useState(null);
 
   const clampedIndex = Math.max(0, Math.min(currentIndex, Math.max((items?.length || 1) - 1, 0)));
-  const baseItem = items?.[clampedIndex] || null;
-  const currentItem = versionOverride || baseItem;
+  const currentItem = items?.[clampedIndex] || null;
   const sources = useMemo(
     () => currentItem
       ? [currentItem.export_path, currentItem.export_preview_path, currentItem.raw_preview_path].filter(Boolean)
@@ -94,18 +91,6 @@ export default function Lightbox({
   const imagePath = sources[sourceIndex] || null;
   const title = fileName(currentItem?.export_path) || currentItem?.stem || "Selected asset";
 
-  // Related versions for the version strip
-  const relatedVersions = useMemo(() => {
-    if (!currentItem?.resource_set_id || !allItems?.length) return [];
-    const setItems = allItems.filter((item) => item.resource_set_id === currentItem.resource_set_id);
-    // Deduplicate by asset_id: same asset imported from multiple paths is NOT a separate version
-    const seen = new Set();
-    return setItems.filter((item) => {
-      if (seen.has(item.asset_id)) return false;
-      seen.add(item.asset_id);
-      return true;
-    });
-  }, [allItems, currentItem?.resource_set_id]);
   const metaWidth = Number(currentItem?.export_metadata?.width || 0);
   const metaHeight = Number(currentItem?.export_metadata?.height || 0);
   const scale = displayScale;
@@ -193,46 +178,11 @@ export default function Lightbox({
     return () => clearTimeout(timer);
   }, [loadState]);
 
-  // Clear version override when navigating to a different base item
-  useEffect(() => {
-    setVersionOverride(null);
-  }, [baseItem?.asset_id]);
-
-  // Reset image load state when current item changes (including version override)
+  // Reset image load state when current item changes
   useEffect(() => {
     if (!open) return;
     resetImageState();
   }, [open, currentItem?.asset_id, currentItem?.export_path, currentItem?.export_preview_path, currentItem?.raw_preview_path]);
-
-  // Switch to a different version — resets image state in the same batch
-  function switchToVersion(nextVer) {
-    const itemsIdx = items.findIndex((item) => item.asset_id === nextVer.asset_id);
-    resetImageState();
-    if (itemsIdx >= 0) {
-      setVersionOverride(null);
-      onIndexChange(itemsIdx);
-    } else {
-      setVersionOverride(nextVer);
-    }
-  }
-
-  // Arrow keys cycle through versions when a version strip is visible
-  useEffect(() => {
-    if (!open || relatedVersions.length <= 1) return undefined;
-    function handleVersionNav(event) {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      const curIdx = relatedVersions.findIndex((v) => v.asset_id === currentItem?.asset_id);
-      if (curIdx < 0) return;
-      const nextIdx = event.key === "ArrowLeft" ? curIdx - 1 : curIdx + 1;
-      if (nextIdx < 0 || nextIdx >= relatedVersions.length) return;
-      event.preventDefault();
-      event.stopPropagation();
-      switchToVersion(relatedVersions[nextIdx]);
-    }
-    // Use capture to intercept before App.jsx handler
-    window.addEventListener("keydown", handleVersionNav, true);
-    return () => window.removeEventListener("keydown", handleVersionNav, true);
-  }, [open, relatedVersions, currentItem?.asset_id, items, onIndexChange]);
 
   useEffect(() => () => {
     if (paintFrameRef.current) cancelAnimationFrame(paintFrameRef.current);
@@ -306,6 +256,7 @@ export default function Lightbox({
     viewRef.current = fit;
     if (imageRef.current) {
       imageRef.current.style.transform = `translate3d(${fit.tx}px, ${fit.ty}px, 0) scale(${fit.scale})`;
+      imageRef.current.style.visibility = "visible";
     }
     setLoadState("ready");
   }
@@ -478,7 +429,7 @@ export default function Lightbox({
             style={{
               transformOrigin: "0 0",
               transform: "translate3d(0, 0, 0) scale(1)",
-              visibility: loadState === "ready" ? "visible" : "hidden",
+              visibility: "hidden",
               willChange: "transform",
             }}
             ref={imageRef}
@@ -491,43 +442,6 @@ export default function Lightbox({
           </div>
         ) : null}
       </div>
-
-      {/* Version strip */}
-      {!proofMode && relatedVersions.length > 1 ? (
-        <div
-          className="flex shrink-0 items-center justify-center gap-1.5 px-4 pb-2 pt-4"
-          onClick={(event) => event.stopPropagation()}
-        >
-          {relatedVersions.map((ver) => {
-            const isActive = ver.asset_id === currentItem.asset_id;
-            const thumbSrc = localFileUrl(ver.export_preview_path || ver.export_path);
-            return (
-              <button
-                key={ver.asset_id}
-                type="button"
-                className={[
-                  "group relative flex-shrink-0 overflow-hidden rounded-md transition-all",
-                  isActive
-                    ? "ring-2 ring-[rgb(var(--accent-color))] ring-offset-1 ring-offset-black"
-                    : "opacity-50 hover:opacity-85",
-                ].join(" ")}
-                onClick={() => {
-                  if (isActive) return;
-                  switchToVersion(ver);
-                }}
-                title={ver.stem}
-              >
-                <img
-                  src={thumbSrc}
-                  alt={ver.stem}
-                  draggable={false}
-                  className="h-10 w-14 object-cover"
-                />
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
 
       <div
         className={[

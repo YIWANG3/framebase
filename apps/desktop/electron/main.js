@@ -585,7 +585,8 @@ function deriveAiRepaintOutputPath(sourcePath) {
 async function startAiRepaintTask(options) {
   const sourcePath = String(options?.sourcePath || "");
   const prompt = String(options?.prompt || "");
-  const provider = String(options?.provider || "nanobanana");
+  const providerId = String(options?.provider || "");
+  const providerType = String(options?.providerType || "nanobanana");
   if (!sourcePath) {
     throw new Error("Missing source image");
   }
@@ -598,14 +599,23 @@ async function startAiRepaintTask(options) {
   if (current.running) {
     return current;
   }
-  const providerConfig = await getStoredProviderConfigWithMigration(provider);
-  const apiKey = providerConfig?.token || null;
+  const providerConfig = await getStoredProviderConfigWithMigration(providerId);
+  let apiKey = providerConfig?.token || null;
+  let baseUrl = null;
+  // For openai_compatible, token is JSON with base_url + token fields
+  if (providerType === "openai_compatible" && apiKey) {
+    try {
+      const parsed = JSON.parse(apiKey);
+      apiKey = parsed.token || null;
+      baseUrl = parsed.base_url || null;
+    } catch (_) { /* plain string token */ }
+  }
   if (!apiKey) {
-    throw new Error(`No API token configured for ${provider}.`);
+    throw new Error(`No API token configured for provider.`);
   }
   const outputPath = options?.outputPath || deriveAiRepaintOutputPath(sourcePath);
   const payload = {
-    provider,
+    provider: providerType,
     source_path: sourcePath,
     output_path: outputPath,
     prompt,
@@ -620,7 +630,7 @@ async function startAiRepaintTask(options) {
     "--job-id",
     job.job_id,
     "--provider",
-    provider,
+    providerType,
     "--input",
     sourcePath,
     "--output",
@@ -641,6 +651,9 @@ async function startAiRepaintTask(options) {
   }
   if (model) {
     command.push("--model", model);
+  }
+  if (baseUrl) {
+    command.push("--base-url", baseUrl);
   }
   command.push("--api-key", apiKey);
   launchSidecarJob(command);
@@ -709,8 +722,8 @@ function buildAppMenu() {
         { label: "New Catalog", accelerator: "CmdOrCtrl+N", click: () => sendMenuAction("catalog:new") },
         { label: "Open Catalog...", accelerator: "CmdOrCtrl+O", click: () => sendMenuAction("catalog:open") },
         { type: "separator" },
-        { label: "Add Processed Media...", click: () => sendMenuAction("import:pick-export") },
-        { label: "Add Sources...", click: () => sendMenuAction("import:pick-source") },
+        { label: "Import", click: () => sendMenuAction("import:pick-export") },
+        { label: "Add Raw Sources", click: () => sendMenuAction("import:pick-source") },
         { type: "separator" },
         { label: "Run Import Pipeline", accelerator: "CmdOrCtrl+I", click: () => sendMenuAction("import:start") },
         { label: "Run Enrichment", click: () => sendMenuAction("import:enrich") },
@@ -750,7 +763,7 @@ ipcMain.handle("workspace:roots", () => {
 
 ipcMain.handle("workspace:pick-directories", async (_event, kind) => {
   const result = await dialog.showOpenDialog({
-    title: kind === "export" ? "Add Processed Media files or folders" : "Add Source files or folders",
+    title: kind === "export" ? "Import files or folders" : "Add raw source files or folders",
     properties: ["openFile", "openDirectory", "multiSelections"],
   });
   return result.canceled ? [] : result.filePaths;
@@ -803,13 +816,24 @@ ipcMain.handle("workspace:ai-repaint-status", () => latestJobStatus("ai_repaint"
 
 ipcMain.handle("workspace:ai-repaint-start", (_event, options) => startAiRepaintTask(options));
 
-ipcMain.handle("workspace:list-ai-models", async (_event, provider) => {
-  const providerKey = String(provider || "nanobanana");
-  const providerConfig = await getStoredProviderConfigWithMigration(providerKey);
-  const apiKey = providerConfig?.token || null;
+ipcMain.handle("workspace:list-ai-models", async (_event, providerId, providerType) => {
+  const instanceId = String(providerId || "");
+  const typeKey = String(providerType || "nanobanana");
+  const providerConfig = await getStoredProviderConfigWithMigration(instanceId);
+  let apiKey = providerConfig?.token || null;
+  let baseUrl = null;
+  if (typeKey === "openai_compatible" && apiKey) {
+    try {
+      const parsed = JSON.parse(apiKey);
+      apiKey = parsed.token || null;
+      baseUrl = parsed.base_url || null;
+    } catch (_) { /* plain string token */ }
+  }
   if (!apiKey) return [];
   try {
-    return callSidecarJson(["list-ai-models", "--provider", providerKey, "--api-key", apiKey]) || [];
+    const cmd = ["list-ai-models", "--provider", typeKey, "--api-key", apiKey];
+    if (baseUrl) cmd.push("--base-url", baseUrl);
+    return callSidecarJson(cmd) || [];
   } catch (err) {
     console.error("[list-ai-models] error:", err.message);
     return [];

@@ -27,8 +27,8 @@ const MENU_SECTIONS = [
   {
     label: "Library",
     items: [
-      { label: "Add Processed Media…", icon: ImagePlus, action: "processed" },
-      { label: "Add Sources…", icon: FolderPlus, action: "sources" },
+      { label: "Import", icon: ImagePlus, action: "processed" },
+      { label: "Add Raw Sources", icon: FolderPlus, action: "sources" },
     ],
   },
   {

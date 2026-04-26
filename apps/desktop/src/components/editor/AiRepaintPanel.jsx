@@ -15,9 +15,10 @@ import {
   X,
 } from "lucide-react";
 
-const PROVIDERS = [
+/* ── Provider type templates (not instances) ── */
+const PROVIDER_TYPES = [
   {
-    key: "nanobanana",
+    type: "nanobanana",
     label: "Nanobanana",
     capability: "Image repaint",
     placeholder: "nb_live_xxx...",
@@ -29,7 +30,7 @@ const PROVIDERS = [
     ],
   },
   {
-    key: "openai",
+    type: "openai",
     label: "OpenAI (GPT Image)",
     capability: "Image edit & repaint",
     placeholder: "sk-xxx...",
@@ -38,7 +39,19 @@ const PROVIDERS = [
     ],
   },
   {
-    key: "jimeng",
+    type: "openai_compatible",
+    label: "OpenAI Compatible",
+    capability: "Custom OpenAI-compatible endpoint",
+    placeholder: "sk-xxx...",
+    authFields: ["base_url", "token"],
+    placeholders: { base_url: "https://your-server.com/v1", token: "API Key" },
+    defaultModels: [
+      { id: "gpt-image-1", name: "GPT Image 1" },
+      { id: "gpt-image-2", name: "GPT Image 2" },
+    ],
+  },
+  {
+    type: "jimeng",
     label: "即梦 (Jimeng)",
     capability: "Image generation & editing",
     authFields: ["access_key_id", "secret_access_key"],
@@ -50,6 +63,41 @@ const PROVIDERS = [
     ],
   },
 ];
+
+function getProviderType(typeKey) {
+  return PROVIDER_TYPES.find((t) => t.type === typeKey) || null;
+}
+
+function generateInstanceId() {
+  return `p_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function generateInstanceName(typeKey, existingInstances) {
+  const tmpl = getProviderType(typeKey);
+  const base = tmpl?.label || typeKey;
+  const sameType = existingInstances.filter((p) => p.type === typeKey);
+  if (sameType.length === 0) return base;
+  return `${base} ${sameType.length + 1}`;
+}
+
+/* ── Merge instance data with its type template ── */
+function enrichInstance(inst) {
+  const tmpl = getProviderType(inst.type);
+  if (!tmpl) return { ...inst, label: inst.name, defaultModels: [] };
+  return {
+    ...tmpl,
+    ...inst,
+    label: inst.name,
+  };
+}
+
+/* ── Old key → type mapping for migration ── */
+const LEGACY_KEY_TO_TYPE = {
+  nanobanana: "nanobanana",
+  openai: "openai",
+  openai_compatible: "openai_compatible",
+  jimeng: "jimeng",
+};
 
 const ASPECT_OPTIONS = [
   { value: "auto", label: "Auto" },
@@ -255,21 +303,46 @@ function EditStyleModal({ title, draft, onChange, onSave, onClose }) {
   );
 }
 
-function ConfigureApiModal({
-  providers,
-  providerKey,
-  tokenValue,
-  hasToken,
-  onChangeProvider,
-  onChangeToken,
-  onSave,
-  onRemove,
+/* ── Provider instance modal: create new / edit existing ── */
+function ProviderModal({
+  mode,          // "new" | "edit"
+  instances,     // all existing instances (for auto-naming)
+  instance,      // existing instance when mode=edit, null for new
+  onSave,        // (instance, tokenValue) => void
+  onDelete,      // (instanceId) => void
   onClose,
 }) {
-  const currentProvider = providers.find((p) => p.key === providerKey);
-  const isMultiField = Boolean(currentProvider?.authFields);
+  const [selectedType, setSelectedType] = useState(instance?.type || PROVIDER_TYPES[0].type);
+  const [name, setName] = useState(
+    instance?.name || (mode === "new" ? generateInstanceName(PROVIDER_TYPES[0].type, instances) : ""),
+  );
+  const [tokenValue, setTokenValue] = useState("");
+  const [hasExistingToken, setHasExistingToken] = useState(false);
 
-  // For multi-field providers, parse tokenValue as JSON
+  // Load existing token when editing
+  useEffect(() => {
+    if (mode === "edit" && instance?.id) {
+      void (async () => {
+        const stored = await window.mediaWorkspace?.getAiProviderToken?.(instance.id);
+        if (stored?.token) {
+          setTokenValue(stored.token);
+          setHasExistingToken(true);
+        }
+      })();
+    }
+  }, [mode, instance?.id]);
+
+  // Auto-update name when type changes in new mode
+  function handleTypeChange(nextType) {
+    setSelectedType(nextType);
+    if (mode === "new") {
+      setName(generateInstanceName(nextType, instances));
+    }
+  }
+
+  const tmpl = getProviderType(selectedType);
+  const isMultiField = Boolean(tmpl?.authFields);
+
   const parsedFields = useMemo(() => {
     if (!isMultiField) return {};
     try { return JSON.parse(tokenValue || "{}"); } catch { return {}; }
@@ -277,15 +350,35 @@ function ConfigureApiModal({
 
   function updateField(fieldName, value) {
     const next = { ...parsedFields, [fieldName]: value };
-    onChangeToken(JSON.stringify(next));
+    setTokenValue(JSON.stringify(next));
+  }
+
+  function handleSave() {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    // Validate credentials
+    if (isMultiField) {
+      try {
+        const parsed = JSON.parse(tokenValue || "{}");
+        if (tmpl.authFields.some((f) => !parsed[f]?.trim())) return;
+      } catch { return; }
+    } else {
+      if (!tokenValue.trim() && !hasExistingToken) return;
+    }
+
+    const inst = mode === "edit"
+      ? { ...instance, name: trimmedName }
+      : { id: generateInstanceId(), type: selectedType, name: trimmedName };
+
+    onSave(inst, tokenValue.trim() || null);
   }
 
   return (
     <div className="fixed inset-0 z-[10210] flex items-center justify-center bg-black/45 px-5 backdrop-blur-[2px]">
-      <div className="w-full max-w-[360px] overflow-hidden rounded-xl border border-border/60 bg-chrome shadow-overlay">
+      <div className="w-full max-w-[380px] overflow-hidden rounded-xl border border-border/60 bg-chrome shadow-overlay">
         <div className="px-4 py-4">
           <div className="flex items-center justify-between gap-3">
-            <PanelLabel>Provider</PanelLabel>
+            <PanelLabel>{mode === "new" ? "New Provider" : "Edit Provider"}</PanelLabel>
             <button
               type="button"
               className="rounded-md p-1 text-muted2 transition-colors hover:bg-white/6 hover:text-text"
@@ -294,33 +387,52 @@ function ConfigureApiModal({
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          <label className="mt-2 block">
-            <select
-              value={providerKey}
-              onChange={(event) => onChangeProvider(event.target.value)}
-              className={TOOLBAR_FIELD}
-            >
-              {providers.map((provider) => (
-                <option key={provider.key} value={provider.key}>
-                  {provider.label}
-                </option>
-              ))}
-            </select>
+
+          {mode === "new" && (
+            <label className="mt-3 block">
+              <div className="mb-1 text-[11px] text-muted">Type</div>
+              <select
+                value={selectedType}
+                onChange={(e) => handleTypeChange(e.target.value)}
+                className={TOOLBAR_FIELD}
+              >
+                {PROVIDER_TYPES.map((t) => (
+                  <option key={t.type} value={t.type}>{t.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {mode === "edit" && (
+            <div className="mt-3 text-[11px] text-muted">
+              Type: {tmpl?.label || instance?.type}
+            </div>
+          )}
+
+          <label className="mt-3 block">
+            <div className="mb-1 text-[11px] text-muted">Name</div>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Provider name"
+              className={`${TOOLBAR_FIELD} placeholder:text-muted2`}
+              autoFocus={mode === "new"}
+            />
           </label>
 
-          <div className="mt-5">
+          <div className="mt-4">
             <PanelLabel>{isMultiField ? "Credentials" : "API Token"}</PanelLabel>
           </div>
 
           {isMultiField ? (
             <div className="mt-2 space-y-2">
-              {currentProvider.authFields.map((field) => (
+              {tmpl.authFields.map((field) => (
                 <div key={field} className="flex h-8 items-center gap-2 rounded-md border border-border/70 bg-app px-2 hover:border-border focus-within:border-accent/50">
                   <KeyRound className="h-3.5 w-3.5 shrink-0 text-muted2" />
                   <input
                     value={parsedFields[field] || ""}
-                    onChange={(event) => updateField(field, event.target.value)}
-                    placeholder={currentProvider.placeholders?.[field] || field}
+                    onChange={(e) => updateField(field, e.target.value)}
+                    placeholder={tmpl.placeholders?.[field] || field}
                     className="h-full flex-1 bg-transparent text-[12px] text-text outline-none placeholder:text-muted2"
                   />
                 </div>
@@ -331,29 +443,32 @@ function ConfigureApiModal({
               <KeyRound className="h-3.5 w-3.5 text-muted2" />
               <input
                 value={tokenValue}
-                onChange={(event) => onChangeToken(event.target.value)}
-                placeholder={currentProvider?.placeholder || "API key..."}
+                onChange={(e) => setTokenValue(e.target.value)}
+                placeholder={tmpl?.placeholder || "API key..."}
                 className="h-full flex-1 bg-transparent text-[12px] text-text outline-none placeholder:text-muted2"
               />
             </div>
           )}
-          <div className="mt-2 text-[11px] text-muted">{hasToken ? "Credentials saved (encrypted)." : "Required before Generate."}</div>
+          {hasExistingToken && !tokenValue.trim() && (
+            <div className="mt-1 text-[11px] text-muted">Credentials saved (encrypted). Leave blank to keep existing.</div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 border-t border-border/60 px-4 py-3">
-          <button
-            type="button"
-            className={ACCENT_BUTTON}
-            onClick={onSave}
-          >
-            Save
+          <button type="button" className={ACCENT_BUTTON} onClick={handleSave}>
+            {mode === "new" ? "Create" : "Save"}
           </button>
-          <button
-            type="button"
-            className={TOOLBAR_BUTTON}
-            onClick={onRemove}
-          >
-            Remove
+          {mode === "edit" && (
+            <button
+              type="button"
+              className="inline-flex h-8 items-center justify-center rounded-md border border-rose-500/30 bg-app px-3 py-0 text-[12px] font-medium text-rose-400 transition-colors hover:border-rose-500/50 hover:bg-rose-500/10"
+              onClick={() => onDelete(instance.id)}
+            >
+              Delete
+            </button>
+          )}
+          <button type="button" className={TOOLBAR_BUTTON} onClick={onClose}>
+            Cancel
           </button>
         </div>
       </div>
@@ -364,13 +479,12 @@ function ConfigureApiModal({
 export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current image", onCompareChange, compareState, onRepaintComplete }) {
   const repaintPollRef = useRef(null);
   const prefsRef = useRef({});
-  const [activeProviderKey, setActiveProviderKey] = useState(null);
+  const [providerInstances, setProviderInstances] = useState([]);
+  const [activeProviderId, setActiveProviderId] = useState(null);
   const [providerConfigs, setProviderConfigs] = useState({});
-  const [modalProviderKey, setModalProviderKey] = useState(PROVIDERS[0].key);
   const [styles, setStyles] = useState(null);
   const [selectedStyleId, setSelectedStyleId] = useState(null);
-  const [tokenDraft, setTokenDraft] = useState("");
-  const [showApiModal, setShowApiModal] = useState(false);
+  const [providerModalState, setProviderModalState] = useState(null); // null | { mode: "new" } | { mode: "edit", instanceId: string }
   const [editingStyleId, setEditingStyleId] = useState(null);
   const [styleDraft, setStyleDraft] = useState({ name: "", prompt: "" });
   const [temperature, setTemperature] = useState(1);
@@ -383,29 +497,23 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
   const [results, setResults] = useState([]);
   const [repaintHistory, setRepaintHistory] = useState([]);
   const [expandedHistoryId, setExpandedHistoryId] = useState(null);
-  const [availableModels, setAvailableModels] = useState(() => {
-    const init = {};
-    for (const p of PROVIDERS) init[p.key] = p.defaultModels;
-    return init;
-  });
-  const [selectedModel, setSelectedModel] = useState(() => {
-    const init = {};
-    for (const p of PROVIDERS) init[p.key] = p.defaultModels[0]?.id || "";
-    return init;
-  });
+  const [availableModels, setAvailableModels] = useState({});
+  const [selectedModel, setSelectedModel] = useState({});
 
-  const provider = useMemo(
-    () => PROVIDERS.find((entry) => entry.key === activeProviderKey) || null,
-    [activeProviderKey],
+  // Derived: active instance enriched with type info
+  const activeInstance = useMemo(
+    () => {
+      const inst = providerInstances.find((p) => p.id === activeProviderId);
+      return inst ? enrichInstance(inst) : null;
+    },
+    [providerInstances, activeProviderId],
   );
   const selectedStyle = useMemo(
     () => styles?.find((entry) => entry.id === selectedStyleId) || null,
     [styles, selectedStyleId],
   );
-  const providerConfig = activeProviderKey ? providerConfigs[activeProviderKey] || null : null;
-  const providerConfigured = Boolean(providerConfig?.token);
-  const modalProviderConfig = providerConfigs[modalProviderKey] || null;
-  const activeModelId = activeProviderKey ? selectedModel[activeProviderKey] : null;
+  const providerConfigured = Boolean(activeProviderId && providerConfigs[activeProviderId]?.token);
+  const activeModelId = activeProviderId ? selectedModel[activeProviderId] : null;
   const isUpscaleModel = activeModelId === "jimeng_i2i_seed3_tilesr_cvtob";
 
   function persistPrefs(patch) {
@@ -414,66 +522,153 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
     void window.mediaWorkspace?.saveAiPreferences?.(next);
   }
 
-  function updateActiveProvider(providerKey) {
-    setActiveProviderKey(providerKey);
-    persistPrefs({ activeProvider: providerKey });
+  function persistInstances(nextInstances) {
+    // Save instance metadata (without tokens) to preferences
+    const stripped = nextInstances.map(({ id, type, name }) => ({ id, type, name }));
+    persistPrefs({ providers: stripped });
   }
 
-  function updateSelectedModel(providerKey, modelId) {
-    setSelectedModel((current) => ({ ...current, [providerKey]: modelId }));
-    persistPrefs({ selectedModels: { ...prefsRef.current.selectedModels, [providerKey]: modelId } });
+  function updateActiveProvider(providerId) {
+    setActiveProviderId(providerId);
+    persistPrefs({ activeProvider: providerId });
   }
 
-  async function fetchModels(providerKey) {
-    const models = await window.mediaWorkspace?.listAiModels?.(providerKey);
+  function updateSelectedModel(providerId, modelId) {
+    setSelectedModel((current) => ({ ...current, [providerId]: modelId }));
+    persistPrefs({ selectedModels: { ...prefsRef.current.selectedModels, [providerId]: modelId } });
+  }
+
+  async function fetchModels(providerId, providerType, tokenValue) {
+    const models = await window.mediaWorkspace?.listAiModels?.(providerId, providerType);
     if (Array.isArray(models) && models.length) {
-      setAvailableModels((current) => ({ ...current, [providerKey]: models }));
-      persistPrefs({ modelsCache: { ...prefsRef.current.modelsCache, [providerKey]: models } });
+      setAvailableModels((current) => ({ ...current, [providerId]: models }));
+      persistPrefs({ modelsCache: { ...prefsRef.current.modelsCache, [providerId]: models } });
       setSelectedModel((current) => {
-        if (current[providerKey] && models.some((m) => m.id === current[providerKey])) return current;
+        if (current[providerId] && models.some((m) => m.id === current[providerId])) return current;
         const fallback = models[0].id;
-        persistPrefs({ selectedModels: { ...prefsRef.current.selectedModels, [providerKey]: fallback } });
-        return { ...current, [providerKey]: fallback };
+        persistPrefs({ selectedModels: { ...prefsRef.current.selectedModels, [providerId]: fallback } });
+        return { ...current, [providerId]: fallback };
       });
     }
   }
 
+  /* ── Migration: convert old per-key configs to instances ── */
+  async function migrateOldProviders(prefs) {
+    if (prefs.providers?.length) return prefs.providers; // already migrated
+
+    const oldKeys = Object.keys(LEGACY_KEY_TO_TYPE);
+    const payloads = await Promise.all(
+      oldKeys.map((key) =>
+        window.mediaWorkspace?.getAiProviderToken?.(key).then((r) => ({ key, ...r })).catch(() => ({ key })),
+      ),
+    );
+
+    const migrated = [];
+    for (const payload of payloads) {
+      if (!payload?.token) continue;
+      const typeKey = LEGACY_KEY_TO_TYPE[payload.key];
+      const tmpl = getProviderType(typeKey);
+      const inst = {
+        id: `p_migrated_${payload.key}`,
+        type: typeKey,
+        name: tmpl?.label || payload.key,
+      };
+      migrated.push(inst);
+      // Copy token under new instance id
+      await window.mediaWorkspace?.setAiProviderToken?.(inst.id, payload.token);
+    }
+
+    if (migrated.length) {
+      // Remap activeProvider from old key to new instance id
+      const oldActive = prefs.activeProvider;
+      let newActive = null;
+      if (oldActive) {
+        const mapped = migrated.find((m) => m.id === `p_migrated_${oldActive}`);
+        if (mapped) newActive = mapped.id;
+      }
+      // Remap selectedModels and modelsCache from old keys to new instance ids
+      const remapObj = (obj) => {
+        if (!obj) return {};
+        const result = {};
+        for (const [key, val] of Object.entries(obj)) {
+          const mapped = migrated.find((m) => m.id === `p_migrated_${key}`);
+          if (mapped) result[mapped.id] = val;
+          else result[key] = val; // keep unmapped as-is
+        }
+        return result;
+      };
+      persistPrefs({
+        providers: migrated.map(({ id, type, name }) => ({ id, type, name })),
+        activeProvider: newActive || migrated[0]?.id || null,
+        selectedModels: remapObj(prefs.selectedModels),
+        modelsCache: remapObj(prefs.modelsCache),
+      });
+      return migrated;
+    }
+    return [];
+  }
+
   useEffect(() => {
     async function loadStored() {
-      // Fire all IPC calls in parallel for speed
-      const [prefs, saved, ...providerPayloads] = await Promise.all([
+      // Load prefs and styles in parallel — styles first so migration can't interfere
+      const [prefs, savedStyles] = await Promise.all([
         window.mediaWorkspace?.getAiPreferences?.().then((p) => p || {}),
         window.mediaWorkspace?.getAiStyles?.(),
-        ...PROVIDERS.map((p) => window.mediaWorkspace?.getAiProviderToken?.(p.key).then((r) => ({ key: p.key, ...r }))),
       ]);
-
-      // Apply preferences
       prefsRef.current = prefs;
-      if (prefs.activeProvider) setActiveProviderKey(prefs.activeProvider);
-      if (prefs.selectedModels) setSelectedModel((cur) => ({ ...cur, ...prefs.selectedModels }));
-      if (prefs.modelsCache) setAvailableModels((cur) => ({ ...cur, ...prefs.modelsCache }));
 
-      // Apply provider tokens
-      for (const payload of providerPayloads) {
-        if (payload?.token) {
-          const { key, ...config } = payload;
-          setProviderConfigs((current) => ({ ...current, [key]: config }));
-          if (!prefs.activeProvider) setActiveProviderKey((current) => current || key);
-          fetchModels(key);
-        }
-      }
-
-      // Apply styles
-      if (Array.isArray(saved) && saved.length) {
-        setStyles(saved);
+      // Apply styles immediately (before any migration)
+      if (Array.isArray(savedStyles) && savedStyles.length) {
+        setStyles(savedStyles);
         setSelectedStyleId((current) => {
-          if (current && saved.some((s) => s.id === current)) return current;
-          return saved[0]?.id ?? null;
+          if (current && savedStyles.some((s) => s.id === current)) return current;
+          return savedStyles[0]?.id ?? null;
         });
       } else {
         setStyles(INITIAL_STYLES);
         setSelectedStyleId(INITIAL_STYLES[0]?.id ?? null);
         persistStyles(INITIAL_STYLES);
+      }
+
+      // Migrate or load instances
+      let instances = prefs.providers?.length
+        ? prefs.providers
+        : await migrateOldProviders(prefs);
+
+      setProviderInstances(instances);
+
+      // Reload prefs after migration may have changed them
+      const freshPrefs = (await window.mediaWorkspace?.getAiPreferences?.()) || prefs;
+      prefsRef.current = freshPrefs;
+
+      if (freshPrefs.activeProvider) setActiveProviderId(freshPrefs.activeProvider);
+      else if (instances.length) setActiveProviderId(instances[0].id);
+
+      if (freshPrefs.selectedModels) setSelectedModel((cur) => ({ ...cur, ...freshPrefs.selectedModels }));
+      if (freshPrefs.modelsCache) setAvailableModels((cur) => ({ ...cur, ...freshPrefs.modelsCache }));
+
+      // Initialize default models for instances without cache
+      for (const inst of instances) {
+        const tmpl = getProviderType(inst.type);
+        if (tmpl?.defaultModels?.length) {
+          setAvailableModels((cur) => {
+            if (cur[inst.id]?.length) return cur;
+            return { ...cur, [inst.id]: tmpl.defaultModels };
+          });
+          setSelectedModel((cur) => {
+            if (cur[inst.id]) return cur;
+            return { ...cur, [inst.id]: tmpl.defaultModels[0].id };
+          });
+        }
+      }
+
+      // Load tokens and fetch models for configured instances
+      for (const inst of instances) {
+        const payload = await window.mediaWorkspace?.getAiProviderToken?.(inst.id);
+        if (payload?.token) {
+          setProviderConfigs((current) => ({ ...current, [inst.id]: payload }));
+          fetchModels(inst.id, inst.type);
+        }
       }
     }
     void loadStored();
@@ -493,7 +688,6 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
     });
   }
 
-  // Load repaint history for current source image
   useEffect(() => {
     if (!sourcePath) return;
     void (async () => {
@@ -502,7 +696,6 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
     })();
   }, [sourcePath]);
 
-  // Refresh history after a new repaint completes
   function refreshHistory() {
     if (!sourcePath) return;
     void (async () => {
@@ -514,16 +707,6 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
   function persistStyles(nextStyles) {
     void window.mediaWorkspace?.saveAiStyles?.(nextStyles);
   }
-
-  useEffect(() => {
-    if (!showApiModal) return;
-    setModalProviderKey(activeProviderKey || PROVIDERS[0].key);
-  }, [activeProviderKey, showApiModal]);
-
-  useEffect(() => {
-    if (!showApiModal) return;
-    setTokenDraft(modalProviderConfig?.token || "");
-  }, [modalProviderConfig, showApiModal]);
 
   function resetDraft() {
     setEditingStyleId(null);
@@ -574,65 +757,93 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
     if (editingStyleId === styleId) resetDraft();
   }
 
-  function saveToken() {
-    const modalProvider = PROVIDERS.find((p) => p.key === modalProviderKey);
-    let nextToken = tokenDraft.trim();
-    if (modalProvider?.authFields) {
-      // Multi-field: validate all fields are filled
-      try {
-        const parsed = JSON.parse(nextToken || "{}");
-        if (modalProvider.authFields.some((f) => !parsed[f]?.trim())) return;
-      } catch { return; }
-    } else {
-      if (!nextToken) return;
+  /* ── Provider instance CRUD ── */
+  function handleSaveProvider(inst, tokenValue) {
+    setProviderInstances((current) => {
+      const exists = current.some((p) => p.id === inst.id);
+      const next = exists
+        ? current.map((p) => (p.id === inst.id ? { id: inst.id, type: inst.type, name: inst.name } : p))
+        : [...current, { id: inst.id, type: inst.type, name: inst.name }];
+      persistInstances(next);
+      return next;
+    });
+
+    // Save token
+    if (tokenValue) {
+      void (async () => {
+        const payload = await window.mediaWorkspace?.setAiProviderToken?.(inst.id, tokenValue);
+        setProviderConfigs((current) => ({
+          ...current,
+          [inst.id]: payload?.token ? payload : { token: tokenValue },
+        }));
+        fetchModels(inst.id, inst.type);
+      })();
     }
-    void (async () => {
-      const payload = await window.mediaWorkspace?.setAiProviderToken?.(modalProviderKey, nextToken);
-      setProviderConfigs((current) => ({
-        ...current,
-        [modalProviderKey]: payload?.token ? payload : { token: nextToken },
-      }));
-      updateActiveProvider(modalProviderKey);
-      setShowApiModal(false);
-      fetchModels(modalProviderKey);
-    })();
+
+    // Initialize default models
+    const tmpl = getProviderType(inst.type);
+    if (tmpl?.defaultModels?.length) {
+      setAvailableModels((cur) => {
+        if (cur[inst.id]?.length) return cur;
+        return { ...cur, [inst.id]: tmpl.defaultModels };
+      });
+      setSelectedModel((cur) => {
+        if (cur[inst.id]) return cur;
+        return { ...cur, [inst.id]: tmpl.defaultModels[0].id };
+      });
+    }
+
+    updateActiveProvider(inst.id);
+    setProviderModalState(null);
   }
 
-  function removeToken() {
-    setTokenDraft("");
-    void (async () => {
-      await window.mediaWorkspace?.deleteAiProviderToken?.(modalProviderKey);
-      setProviderConfigs((current) => {
-        const next = { ...current };
-        delete next[modalProviderKey];
-        return next;
-      });
-      setActiveProviderKey((current) => {
-        const next = current === modalProviderKey ? null : current;
+  function handleDeleteProvider(instanceId) {
+    setProviderInstances((current) => {
+      const next = current.filter((p) => p.id !== instanceId);
+      persistInstances(next);
+      return next;
+    });
+    void window.mediaWorkspace?.deleteAiProviderToken?.(instanceId);
+    setProviderConfigs((current) => {
+      const next = { ...current };
+      delete next[instanceId];
+      return next;
+    });
+    setActiveProviderId((current) => {
+      if (current === instanceId) {
+        const remaining = providerInstances.filter((p) => p.id !== instanceId);
+        const next = remaining[0]?.id || null;
         persistPrefs({ activeProvider: next });
         return next;
-      });
-    })();
+      }
+      return current;
+    });
+    setProviderModalState(null);
   }
 
   function queueApply() {
     const effectivePrompt = customPrompt.trim() || selectedStyle?.prompt;
     if (!isUpscaleModel && !effectivePrompt) return;
     if (!providerConfigured) {
-      setShowApiModal(true);
+      if (providerInstances.length === 0) {
+        setProviderModalState({ mode: "new" });
+      } else {
+        setProviderModalState({ mode: "edit", instanceId: activeProviderId });
+      }
       return;
     }
     if (!sourcePath) return;
     void (async () => {
-      const providerKey = activeProviderKey || PROVIDERS[0].key;
+      const inst = providerInstances.find((p) => p.id === activeProviderId);
       const task = await window.mediaWorkspace?.startAiRepaint?.({
-        provider: providerKey,
+        provider: activeProviderId,
+        providerType: inst?.type || "nanobanana",
         sourcePath,
         prompt: isUpscaleModel ? "" : effectivePrompt,
         aspectRatio: aspectRatio === "auto" ? null : aspectRatio,
         resolution,
         temperature,
-        model: selectedModel[providerKey] || null,
+        model: selectedModel[activeProviderId] || null,
       });
       setGenerateStatus({
         running: Boolean(task?.running),
@@ -679,43 +890,62 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
     };
   }, [generateStatus.running]);
 
+  const editingInstance = providerModalState?.mode === "edit"
+    ? providerInstances.find((p) => p.id === providerModalState.instanceId) || null
+    : null;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto py-2">
         <CollapsibleSection label="Provider" collapsed={collapsedSections.has("provider")} onToggle={() => toggleSection("provider")}>
           <div className="flex items-center gap-2">
             <select
-              value={activeProviderKey || ""}
+              value={activeProviderId || ""}
               onChange={(event) => updateActiveProvider(event.target.value)}
               className={`min-w-0 flex-1 ${TOOLBAR_FIELD}`}
             >
-              {PROVIDERS.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}{providerConfigs[p.key]?.token ? "" : " (not configured)"}
+              {providerInstances.length === 0 && (
+                <option value="" disabled>No providers configured</option>
+              )}
+              {providerInstances.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}{providerConfigs[p.id]?.token ? "" : " (no key)"}
                 </option>
               ))}
             </select>
             <button
               type="button"
               className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border/70 bg-app text-text transition-colors hover:border-border hover:bg-hover"
-              onClick={() => { setModalProviderKey(activeProviderKey || PROVIDERS[0].key); setShowApiModal(true); }}
-              title="Configure API key"
+              onClick={() => setProviderModalState({ mode: "new" })}
+              title="Add provider"
             >
-              <KeyRound className="h-3.5 w-3.5" />
+              <Plus className="h-3.5 w-3.5" />
             </button>
+            {activeProviderId && (
+              <button
+                type="button"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border/70 bg-app text-text transition-colors hover:border-border hover:bg-hover"
+                onClick={() => setProviderModalState({ mode: "edit", instanceId: activeProviderId })}
+                title="Edit provider"
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
-          <div className="mt-2">
-            <div className="text-[11px] text-muted">Model</div>
-            <select
-              value={selectedModel[activeProviderKey] || ""}
-              onChange={(event) => updateSelectedModel(activeProviderKey, event.target.value)}
-              className={`mt-1 ${TOOLBAR_FIELD}`}
-            >
-              {(availableModels[activeProviderKey] || []).map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
-          </div>
+          {activeInstance && (
+            <div className="mt-2">
+              <div className="text-[11px] text-muted">Model</div>
+              <select
+                value={selectedModel[activeProviderId] || ""}
+                onChange={(event) => updateSelectedModel(activeProviderId, event.target.value)}
+                className={`mt-1 ${TOOLBAR_FIELD}`}
+              >
+                {(availableModels[activeProviderId] || []).map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </CollapsibleSection>
 
         <CollapsibleSection label="Parameters" collapsed={collapsedSections.has("parameters")} onToggle={() => toggleSection("parameters")}>
@@ -1059,17 +1289,14 @@ export default function AiRepaintPanel({ sourcePath, sourceLabel = "Current imag
         />
       ) : null}
 
-      {showApiModal ? (
-        <ConfigureApiModal
-          providers={PROVIDERS}
-          providerKey={modalProviderKey}
-          tokenValue={tokenDraft}
-          hasToken={Boolean(modalProviderConfig?.token)}
-          onChangeProvider={setModalProviderKey}
-          onChangeToken={setTokenDraft}
-          onSave={saveToken}
-          onRemove={removeToken}
-          onClose={() => setShowApiModal(false)}
+      {providerModalState ? (
+        <ProviderModal
+          mode={providerModalState.mode}
+          instances={providerInstances}
+          instance={editingInstance}
+          onSave={handleSaveProvider}
+          onDelete={handleDeleteProvider}
+          onClose={() => setProviderModalState(null)}
         />
       ) : null}
     </div>

@@ -26,7 +26,8 @@ module.exports = {
         error: "rgb(var(--error-color) / <alpha-value>)",
       },
       boxShadow: {
-        overlay: "0 18px 48px rgba(0, 0, 0, 0.28), 0 4px 12px rgba(0, 0, 0, 0.12)",
+        overlay: "var(--shadow-overlay)",
+        menu: "var(--shadow-menu)",
         glow: "0 0 12px rgba(var(--glow-accent), 0.25), 0 0 4px rgba(var(--glow-accent), 0.15)",
         "card-hover": "0 8px 24px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15)",
       },

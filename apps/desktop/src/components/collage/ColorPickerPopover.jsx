@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 
 // ── Color math ────────────────────────────────────────────
@@ -173,10 +173,10 @@ export default function ColorPickerPopover({ color, onChange, onClose, anchorEl 
 
   const [hsv, setHsv] = useState({ h: hueRef.current, s: initial.s, v: initial.v });
   const [hexDraft, setHexDraft] = useState((color || "#000000").replace("#", "").toUpperCase());
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState(null);
 
   // Position near anchor
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!anchorEl) return;
     const rect = anchorEl.getBoundingClientRect();
     const popW = 240;
@@ -245,6 +245,8 @@ export default function ColorPickerPopover({ color, onChange, onClose, anchorEl 
   }
 
   const currentHex = hsvToHex(hsv.h, hsv.s, hsv.v);
+
+  if (!pos) return null;
 
   return createPortal(
     <div

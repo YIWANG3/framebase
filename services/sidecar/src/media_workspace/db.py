@@ -1160,6 +1160,10 @@ def list_export_assets(
         status_clause = "registry.match_status IN ('auto_bound', 'manual_confirmed')"
     elif status == "unmatched":
         status_clause = "registry.match_status IN ('unmatched', 'pending_confirmation')"
+    elif status == "rated":
+        status_clause = "registry.match_status IN ('auto_bound', 'manual_confirmed', 'unmatched', 'pending_confirmation') AND assets.app_rating > 0"
+    elif status == "recent":
+        status_clause = "registry.match_status IN ('auto_bound', 'manual_confirmed', 'unmatched', 'pending_confirmation') AND assets.created_at >= datetime('now', '-7 days')"
     elif status == "all":
         status_clause = "registry.match_status IN ('auto_bound', 'manual_confirmed', 'unmatched', 'pending_confirmation')"
     else:
@@ -1710,6 +1714,22 @@ def summary(connection: sqlite3.Connection) -> dict[str, int]:
         ).fetchone()[0],
         "raw_enriched": connection.execute(
             "SELECT COUNT(*) FROM raw_metadata_cache WHERE metadata_level = 'full' AND enrichment_status = 'done'"
+        ).fetchone()[0],
+        "rated_count": connection.execute(
+            """
+            SELECT COUNT(DISTINCT registry.export_asset_id)
+            FROM export_lookup_registry AS registry
+            JOIN assets ON assets.asset_id = registry.export_asset_id
+            WHERE assets.app_rating > 0
+            """
+        ).fetchone()[0],
+        "recently_added_count": connection.execute(
+            """
+            SELECT COUNT(DISTINCT registry.export_asset_id)
+            FROM export_lookup_registry AS registry
+            JOIN assets ON assets.asset_id = registry.export_asset_id
+            WHERE assets.created_at >= datetime('now', '-7 days')
+            """
         ).fetchone()[0],
     }
 

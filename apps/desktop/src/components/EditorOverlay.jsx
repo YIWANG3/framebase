@@ -489,7 +489,7 @@ function AngleRuler({ value, viewportWidth, viewportHeight, centerX, onChangeSta
           top: 0,
           width: "1px",
           height: `${h}px`,
-          background: "white",
+          background: "rgb(var(--text-color))",
           opacity,
           transform: "translateX(-0.5px)",
         }}
@@ -505,7 +505,7 @@ function AngleRuler({ value, viewportWidth, viewportHeight, centerX, onChangeSta
             top: `${h + 6}px`,
             transform: "translateX(-50%)",
             fontSize: "10px",
-            color: "white",
+            color: "rgb(var(--text-color))",
             opacity: deg === 0 ? 0.6 : 0.3,
             whiteSpace: "nowrap",
           }}
@@ -548,7 +548,7 @@ function AngleRuler({ value, viewportWidth, viewportHeight, centerX, onChangeSta
           }}
         />
       </div>
-      <div className="mt-0.5 text-center text-[11px] font-medium tabular-nums text-white/50">
+      <div className="mt-0.5 text-center text-[11px] font-medium tabular-nums text-muted">
         {value.toFixed(1)}°
       </div>
     </div>
@@ -1379,7 +1379,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
 
       <div
         ref={viewportRef}
-        className="relative min-h-0 flex-1 overflow-hidden bg-[rgb(5,5,5)]"
+      className="relative min-h-0 flex-1 overflow-hidden bg-app"
         style={{ cursor: spacePressed ? "grab" : activeInteraction === "rotate" ? "crosshair" : activeInteraction === "image-pan" ? "grabbing" : "default" }}
         onPointerDown={spacePressed ? beginImagePan : undefined}
         onPointerMove={handlePointerMove}
@@ -1413,10 +1413,10 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
             {/* Non-rotating crop overlay — stays axis-aligned, z-10 above rotated image */}
             {showCropUi && cropRect ? (
               <div className="pointer-events-none absolute inset-0" style={{ zIndex: 10 }}>
-                <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: `${cropRect.y}px`, backgroundColor: "rgba(0,0,0,0.65)" }} />
-                <div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ height: `${viewportSize.height - cropRect.y - cropRect.height}px`, backgroundColor: "rgba(0,0,0,0.65)" }} />
-                <div className="pointer-events-none absolute" style={{ left: 0, top: `${cropRect.y}px`, width: `${cropRect.x}px`, height: `${cropRect.height}px`, backgroundColor: "rgba(0,0,0,0.65)" }} />
-                <div className="pointer-events-none absolute" style={{ right: 0, top: `${cropRect.y}px`, width: `${viewportSize.width - cropRect.x - cropRect.width}px`, height: `${cropRect.height}px`, backgroundColor: "rgba(0,0,0,0.65)" }} />
+                <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: `${cropRect.y}px`, backgroundColor: "var(--crop-scrim)" }} />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ height: `${viewportSize.height - cropRect.y - cropRect.height}px`, backgroundColor: "var(--crop-scrim)" }} />
+                <div className="pointer-events-none absolute" style={{ left: 0, top: `${cropRect.y}px`, width: `${cropRect.x}px`, height: `${cropRect.height}px`, backgroundColor: "var(--crop-scrim)" }} />
+                <div className="pointer-events-none absolute" style={{ right: 0, top: `${cropRect.y}px`, width: `${viewportSize.width - cropRect.x - cropRect.width}px`, height: `${cropRect.height}px`, backgroundColor: "var(--crop-scrim)" }} />
 
                 <div
                   className="pointer-events-none absolute"
@@ -1461,7 +1461,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
             style={{ width: `${PANEL_WIDTH}px` }}
             data-editor-wheel-scope="panel"
           >
-            <div className="flex h-6 items-center justify-between border-b border-border/60 bg-black/20 px-3">
+            <div className="flex h-6 items-center justify-between border-b border-border/60 bg-panel2 px-3">
               <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--accent-color)/0.72)]">{panelMeta.title}</div>
               {panelMeta.badge ? (
                 <div className="rounded-full bg-[rgb(var(--accent-color)/0.10)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[rgb(var(--accent-color))]">

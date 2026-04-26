@@ -210,9 +210,6 @@ export default function CollagePanel({
                 }}
                 className="w-16 rounded-md bg-app px-2 py-1 text-center text-[11px] text-text outline-none border border-border/40 focus:border-[rgb(var(--accent-color)/0.5)]"
               />
-              {isCustomRatio && (
-                <span className="text-[10px] text-accent">{customRatioW}:{customRatioH}</span>
-              )}
             </div>
           </div>
 
@@ -221,7 +218,7 @@ export default function CollagePanel({
               <div className="text-[11px] text-muted">Gap</div>
               <div className="text-[11px] text-muted2">{gap}px</div>
             </div>
-            <input type="range" min={0} max={50} step={1} value={gap}
+            <input type="range" min={0} max={Math.round(exportWidth * 0.1)} step={1} value={gap}
               onChange={(e) => onGapChange(Number(e.target.value))} className="mt-1 w-full" />
           </div>
 
@@ -230,7 +227,7 @@ export default function CollagePanel({
               <div className="text-[11px] text-muted">Padding</div>
               <div className="text-[11px] text-muted2">{padding}px</div>
             </div>
-            <input type="range" min={0} max={50} step={1} value={padding}
+            <input type="range" min={0} max={Math.round(exportWidth * 0.1)} step={1} value={padding}
               onChange={(e) => onPaddingChange(Number(e.target.value))} className="mt-1 w-full" />
           </div>
 
@@ -239,7 +236,7 @@ export default function CollagePanel({
               <div className="text-[11px] text-muted">Border Radius</div>
               <div className="text-[11px] text-muted2">{borderRadius}px</div>
             </div>
-            <input type="range" min={0} max={50} step={1} value={borderRadius}
+            <input type="range" min={0} max={Math.round(exportWidth * 0.15)} step={1} value={borderRadius}
               onChange={(e) => onBorderRadiusChange(Number(e.target.value))} className="mt-1 w-full" />
           </div>
 
@@ -256,7 +253,7 @@ export default function CollagePanel({
                       "h-6 w-6 rounded-full border-2 transition-colors",
                       isActive
                         ? "border-[rgb(var(--accent-color))] ring-1 ring-[rgb(var(--accent-color)/0.3)]"
-                        : "border-transparent hover:border-white/20",
+                        : "border-transparent hover:border-border",
                     ].join(" ")}
                     onClick={() => { onBgColorChange(color); setShowColorPicker(false); }}
                     title={color}
@@ -276,7 +273,7 @@ export default function CollagePanel({
                   "h-6 w-6 rounded-full border-2 transition-colors",
                   !BG_PRESETS.some((c) => c.toLowerCase() === bgColor.toLowerCase())
                     ? "border-[rgb(var(--accent-color))] ring-1 ring-[rgb(var(--accent-color)/0.3)]"
-                    : "border-transparent hover:border-white/20",
+                    : "border-transparent hover:border-border",
                 ].join(" ")}
                 onClick={() => setShowColorPicker((v) => !v)}
                 title="Custom color"
@@ -306,28 +303,22 @@ export default function CollagePanel({
       </Section>
 
       <Section label="Export">
-        <div>
-          <div className="text-[11px] text-muted">Output Width</div>
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {[1080, 2048, 3000, 4096].map((w) => (
-              <button
-                key={w}
-                type="button"
-                className={[
-                  "rounded-md px-2.5 py-1 text-[11px] transition-colors",
-                  exportWidth === w
-                    ? "bg-selected text-text"
-                    : "bg-app text-muted hover:bg-hover hover:text-text",
-                ].join(" ")}
-                onClick={() => onExportWidthChange(w)}
-              >
-                {w}px
-              </button>
-            ))}
-          </div>
-          <div className="mt-1.5 text-[10px] text-muted2">
-            {exportWidth} × {Math.round(exportWidth / (canvasRatio || 1))}px
-          </div>
+        <div className="flex flex-wrap gap-1">
+          {[1080, 2048, 3000, 4096].map((w) => (
+            <button
+              key={w}
+              type="button"
+              className={[
+                "rounded-md px-2.5 py-1 text-[11px] transition-colors",
+                exportWidth === w
+                  ? "bg-selected text-text"
+                  : "bg-app text-muted hover:bg-hover hover:text-text",
+              ].join(" ")}
+              onClick={() => onExportWidthChange(w)}
+            >
+              {w}px
+            </button>
+          ))}
         </div>
       </Section>
     </div>
