@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld("mediaWorkspace", {
   collectionRemoveItems: (collectionId, assetIds) => ipcRenderer.invoke("workspace:collection-remove-items", collectionId, assetIds),
   setAssetRating: (assetIds, rating) => ipcRenderer.invoke("workspace:set-asset-rating", assetIds, rating),
   browseCollection: (collectionId, options) => ipcRenderer.invoke("workspace:browse-collection", collectionId, options),
+  listSystemFonts: () => ipcRenderer.invoke("workspace:list-system-fonts"),
   onMenuAction: (callback) => {
     ipcRenderer.removeAllListeners("workspace:menu-action");
     ipcRenderer.on("workspace:menu-action", (_event, action) => callback(action));
