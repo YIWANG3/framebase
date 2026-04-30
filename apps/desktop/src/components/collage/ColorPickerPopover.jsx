@@ -161,7 +161,54 @@ function HueSlider({ hue, onChange }) {
 
 // ── Main Popover ──────────────────────────────────────────
 
-export default function ColorPickerPopover({ color, onChange, onClose, anchorEl }) {
+// ── Opacity Slider ───────────────────────────────────────
+
+function OpacitySlider({ hue, sat, val, opacity, onChange }) {
+  const ref = useRef(null);
+
+  const update = useCallback((e) => {
+    const rect = ref.current.getBoundingClientRect();
+    const a = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    onChange(Math.round(a * 100) / 100);
+  }, [onChange]);
+
+  function onDown(e) {
+    e.preventDefault();
+    ref.current.setPointerCapture(e.pointerId);
+    update(e);
+  }
+
+  function onMove(e) {
+    if (!ref.current.hasPointerCapture(e.pointerId)) return;
+    update(e);
+  }
+
+  const { r, g, b } = hsvToRgb(hue, sat, val);
+
+  return (
+    <div
+      ref={ref}
+      className="relative cursor-pointer rounded-full"
+      style={{
+        width: 208,
+        height: 12,
+        background: `linear-gradient(to right, rgba(${r},${g},${b},0), rgba(${r},${g},${b},1)), repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 8px 8px`,
+      }}
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+    >
+      <div
+        className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white"
+        style={{
+          left: `${opacity * 100}%`,
+          boxShadow: "0 0 2px rgba(0,0,0,0.6)",
+        }}
+      />
+    </div>
+  );
+}
+
+export default function ColorPickerPopover({ color, onChange, onClose, anchorEl, opacity: opacityProp, onOpacityChange }) {
   const popoverRef = useRef(null);
   const hueRef = useRef(0);
   const onCloseRef = useRef(onClose);
@@ -173,7 +220,12 @@ export default function ColorPickerPopover({ color, onChange, onClose, anchorEl 
 
   const [hsv, setHsv] = useState({ h: hueRef.current, s: initial.s, v: initial.v });
   const [hexDraft, setHexDraft] = useState((color || "#000000").replace("#", "").toUpperCase());
+  const [localOpacity, setLocalOpacity] = useState(opacityProp ?? 1);
   const [pos, setPos] = useState(null);
+
+  const hasExternalOpacity = onOpacityChange != null;
+  const opacity = hasExternalOpacity ? (opacityProp ?? 1) : localOpacity;
+  const setOpacity = hasExternalOpacity ? onOpacityChange : setLocalOpacity;
 
   // Position near anchor
   useLayoutEffect(() => {
@@ -245,6 +297,20 @@ export default function ColorPickerPopover({ color, onChange, onClose, anchorEl 
   }
 
   const currentHex = hsvToHex(hsv.h, hsv.s, hsv.v);
+  const { r: cr, g: cg, b: cb } = hsvToRgb(hsv.h, hsv.s, hsv.v);
+
+  const pickFromScreen = useCallback(async () => {
+    try {
+      if (!window.EyeDropper) return;
+      const dropper = new window.EyeDropper();
+      const result = await dropper.open();
+      if (result?.sRGBHex) {
+        const parsed = hexToHsv(result.sRGBHex);
+        if (parsed.s > 0.01 || parsed.v > 0.01) hueRef.current = parsed.h;
+        setHsv({ h: hueRef.current, s: parsed.s, v: parsed.v });
+      }
+    } catch { /* user cancelled */ }
+  }, []);
 
   if (!pos) return null;
 
@@ -255,17 +321,18 @@ export default function ColorPickerPopover({ color, onChange, onClose, anchorEl 
       style={{ top: pos.top, left: pos.left, width: 240 }}
     >
       <div className="space-y-3">
-        {/* SB Area */}
         <SatBrightArea hue={hsv.h} sat={hsv.s} val={hsv.v} onChange={onSBChange} />
-
-        {/* Hue Slider */}
         <HueSlider hue={hsv.h} onChange={onHueChange} />
+        <OpacitySlider hue={hsv.h} sat={hsv.s} val={hsv.v} opacity={opacity} onChange={setOpacity} />
 
-        {/* Hex Input + Preview */}
-        <div className="flex items-center gap-2">
+        {/* Hex + Opacity input row */}
+        <div className="flex items-center gap-1.5">
+          {/* Preview swatch with checkerboard behind for transparency */}
           <div
             className="h-7 w-7 shrink-0 rounded border border-border"
-            style={{ backgroundColor: currentHex }}
+            style={{
+              background: `linear-gradient(rgba(${cr},${cg},${cb},${opacity}), rgba(${cr},${cg},${cb},${opacity})), repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 8px 8px`,
+            }}
           />
           <div className="flex flex-1 items-center rounded border border-border/60 bg-app px-2 py-1">
             <span className="text-[11px] text-muted2">#</span>
@@ -280,6 +347,32 @@ export default function ColorPickerPopover({ color, onChange, onClose, anchorEl 
               spellCheck={false}
             />
           </div>
+          <div className="flex w-[52px] items-center rounded border border-border/60 bg-app px-1.5 py-1">
+            <input
+              type="text"
+              value={`${Math.round(opacity * 100)}`}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (!isNaN(v)) setOpacity(Math.max(0, Math.min(1, v / 100)));
+              }}
+              onBlur={() => {}}
+              className="w-full bg-transparent text-center text-[12px] text-text outline-none"
+              spellCheck={false}
+            />
+            <span className="text-[10px] text-muted2">%</span>
+          </div>
+          {window.EyeDropper && (
+            <button
+              type="button"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border/60 bg-app transition-colors hover:bg-hover"
+              title="Pick color from screen"
+              onClick={pickFromScreen}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted">
+                <path d="m2 22 1-1h3l9-9" /><path d="M3 21v-3l9-9" /><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </div>,

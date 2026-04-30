@@ -13,6 +13,8 @@ protocol.registerSchemesAsPrivileged([
 
 const configuredCatalogPath = process.env.MEDIA_WORKSPACE_CATALOG;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+const isPackaged = app.isPackaged;
+
 const rootCandidates = [
   path.resolve(__dirname, "..", "..", ".."),
   path.resolve(process.cwd(), "..", ".."),
@@ -30,9 +32,20 @@ function pickRootDir() {
 }
 
 const rootDir = pickRootDir();
-const sidecarSrc = path.join(rootDir, "services", "sidecar", "src");
-const scratchCatalogPath = path.join(rootDir, "data", "ui-import-scratch.mwcatalog");
-const reviewCatalogPath = path.join(rootDir, "data", "review-2026.mwcatalog");
+
+// In packaged mode, sidecar source is in extraResources; in dev, it's in the monorepo
+const sidecarSrc = isPackaged
+  ? path.join(process.resourcesPath, "sidecar", "src")
+  : path.join(rootDir, "services", "sidecar", "src");
+
+// In dev mode, use default catalog paths from the monorepo data/ dir.
+// In packaged mode, there is no default — user must create or open a catalog.
+const scratchCatalogPath = isPackaged
+  ? null
+  : path.join(rootDir, "data", "ui-import-scratch.mwcatalog");
+const reviewCatalogPath = isPackaged
+  ? null
+  : path.join(rootDir, "data", "review-2026.mwcatalog");
 
 function resolveCatalogPath() {
   if (configuredCatalogPath) {
@@ -157,11 +170,29 @@ async function getStoredProviderConfigWithMigration(provider) {
   return existing || null;
 }
 
-function prepareCatalogPath() {
+function catalogHasDb() {
+  if (!currentCatalogPath) return false;
+  try {
+    const entries = fs.readdirSync(currentCatalogPath);
+    const has = entries.some((e) => e.endsWith(".sqlite3") || e === "catalog.db");
+    console.log("[catalogHasDb]", currentCatalogPath, "entries:", entries.length, "hasDb:", has);
+    return has;
+  } catch (err) {
+    console.warn("[catalogHasDb] error reading dir:", err.message);
+    return false;
+  }
+}
+
+async function prepareCatalogPath() {
+  console.log("[prepareCatalogPath] currentCatalogPath:", currentCatalogPath);
+  if (!currentCatalogPath) return;
   fs.mkdirSync(currentCatalogPath, { recursive: true });
-  // Migrate and repair resource sets on startup
-  try { callSidecar(["split-shared-assets"]); } catch (_) { /* best-effort */ }
-  try { callSidecar(["repair-resource-sets"]); } catch (_) { /* best-effort */ }
+  if (!catalogHasDb()) {
+    console.log("[prepareCatalogPath] empty catalog, skipping sidecar migration");
+    return;
+  }
+  try { await callSidecarAsync(["split-shared-assets"]); } catch (_) { /* best-effort */ }
+  try { await callSidecarAsync(["repair-resource-sets"]); } catch (_) { /* best-effort */ }
 }
 
 function workspaceInfo() {
@@ -209,20 +240,18 @@ function createCatalogAt(targetPath) {
 }
 
 function callSidecar(command) {
-  const result = spawnSync(
-    "python3",
-    buildSidecarArgs(command),
-    {
-      cwd: rootDir,
-      env: {
-        ...process.env,
-        PYTHONPATH: sidecarSrc,
-      },
-      encoding: "utf-8",
-    },
-  );
+  const { cmd, args, env } = sidecarCommand(command);
+  console.log("[sidecar:sync]", cmd, args.join(" "));
+  const t0 = Date.now();
+  const result = spawnSync(cmd, args, { cwd: rootDir, env, encoding: "utf-8", timeout: 30000 });
+  console.log("[sidecar:sync] done in", Date.now() - t0, "ms, exit:", result.status);
 
+  if (result.error) {
+    console.error("[sidecar:sync] spawn error:", result.error.message);
+    throw result.error;
+  }
   if (result.status !== 0) {
+    console.error("[sidecar:sync] stderr:", result.stderr?.slice(0, 500));
     throw new Error(result.stderr || result.stdout || "sidecar command failed");
   }
 
@@ -234,24 +263,39 @@ function callSidecarJson(command) {
   return payload ? JSON.parse(payload) : null;
 }
 
-function callSidecarAsync(command) {
+function callSidecarAsync(command, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     const errChunks = [];
-    const child = spawn("python3", buildSidecarArgs(command), {
-      cwd: rootDir,
-      env: { ...process.env, PYTHONPATH: sidecarSrc },
-    });
+    const { cmd, args, env } = sidecarCommand(command);
+    console.log("[sidecar:async]", cmd, args.join(" "));
+    const t0 = Date.now();
+    const child = spawn(cmd, args, { cwd: rootDir, env });
+
+    const timer = setTimeout(() => {
+      console.error("[sidecar:async] TIMEOUT after", timeoutMs, "ms — killing child");
+      child.kill("SIGKILL");
+      reject(new Error(`sidecar timed out after ${timeoutMs}ms: ${command.join(" ")}`));
+    }, timeoutMs);
+
     child.stdout.on("data", (data) => chunks.push(data));
     child.stderr.on("data", (data) => errChunks.push(data));
     child.on("close", (code) => {
+      clearTimeout(timer);
+      console.log("[sidecar:async] done in", Date.now() - t0, "ms, exit:", code);
       if (code !== 0) {
-        reject(new Error(Buffer.concat(errChunks).toString() || "sidecar command failed"));
+        const stderr = Buffer.concat(errChunks).toString();
+        console.error("[sidecar:async] stderr:", stderr.slice(0, 500));
+        reject(new Error(stderr || "sidecar command failed"));
         return;
       }
       resolve(Buffer.concat(chunks).toString().trim());
     });
-    child.on("error", reject);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      console.error("[sidecar:async] spawn error:", err.message);
+      reject(err);
+    });
   });
 }
 
@@ -260,20 +304,30 @@ async function callSidecarJsonAsync(command) {
   return payload ? JSON.parse(payload) : null;
 }
 
-function buildSidecarArgs(command) {
-  return ["-m", "media_workspace", "--catalog", currentCatalogPath, ...command];
+// Sidecar: packaged = standalone binary, dev = python3 -m media_workspace
+const sidecarBin = isPackaged
+  ? path.join(process.resourcesPath, "sidecar", "media-workspace", "media-workspace")
+  : null;
+
+function sidecarCommand(command) {
+  if (!currentCatalogPath) {
+    console.error("[sidecarCommand] No catalog is open! command:", command);
+    throw new Error("No catalog is open");
+  }
+  if (sidecarBin) {
+    console.log("[sidecarCommand] using binary:", sidecarBin, "exists:", fs.existsSync(sidecarBin));
+    return { cmd: sidecarBin, args: ["--catalog", currentCatalogPath, ...command], env: process.env };
+  }
+  return {
+    cmd: "python3",
+    args: ["-m", "media_workspace", "--catalog", currentCatalogPath, ...command],
+    env: { ...process.env, PYTHONPATH: sidecarSrc },
+  };
 }
 
 function spawnDetachedSidecar(command) {
-  return spawn("python3", buildSidecarArgs(command), {
-    cwd: rootDir,
-    env: {
-      ...process.env,
-      PYTHONPATH: sidecarSrc,
-    },
-    detached: true,
-    stdio: "ignore",
-  });
+  const { cmd, args, env } = sidecarCommand(command);
+  return spawn(cmd, args, { cwd: rootDir, env, detached: true, stdio: "ignore" });
 }
 
 function launchSidecarJob(command) {
@@ -282,6 +336,11 @@ function launchSidecarJob(command) {
 }
 
 function runPythonJson(script, args = []) {
+  if (isPackaged) {
+    // In packaged mode, python3 may not be available. Use sidecar binary if possible,
+    // otherwise fall back to python3 and let it fail gracefully.
+    console.warn("[runPythonJson] called in packaged mode — python3 may not be available");
+  }
   const result = spawnSync("python3", ["-c", script, ...args], {
     cwd: rootDir,
     env: {
@@ -289,6 +348,7 @@ function runPythonJson(script, args = []) {
       PYTHONPATH: sidecarSrc,
     },
     encoding: "utf-8",
+    timeout: 10000,
   });
 
   if (result.status !== 0) {
@@ -506,15 +566,16 @@ function formatJobStatus(job) {
   };
 }
 
-function latestJobStatus(jobType) {
-  return formatJobStatus(callSidecarJson(["latest-job", "--job-type", jobType]));
+async function latestJobStatus(jobType) {
+  const job = await callSidecarJsonAsync(["latest-job", "--job-type", jobType]);
+  return formatJobStatus(job);
 }
 
-function createJob(jobType, payload) {
-  return callSidecarJson(["create-job", "--job-type", jobType, "--payload-json", JSON.stringify(payload || {})]);
+async function createJob(jobType, payload) {
+  return await callSidecarJsonAsync(["create-job", "--job-type", jobType, "--payload-json", JSON.stringify(payload || {})]);
 }
 
-function registerRoots(rootType, paths) {
+async function registerRoots(rootType, paths) {
   const uniquePaths = [...new Set((paths || []).filter(Boolean))];
   if (!uniquePaths.length) {
     return [];
@@ -523,20 +584,20 @@ function registerRoots(rootType, paths) {
   for (const targetPath of uniquePaths) {
     command.push("--path", targetPath);
   }
-  return callSidecarJson(command) || [];
+  return await callSidecarJsonAsync(command) || [];
 }
 
-function startEnrichmentTask() {
-  const current = latestJobStatus("enrichment");
+async function startEnrichmentTask() {
+  const current = await latestJobStatus("enrichment");
   if (current.running) {
     return current;
   }
-  const job = createJob("enrichment", {});
+  const job = await createJob("enrichment", {});
   launchSidecarJob(["run-enrichment-job", "--job-id", job.job_id]);
   return formatJobStatus(job);
 }
 
-function startImportTask(options) {
+async function startImportTask(options) {
   const mode = String(options?.mode || "combined");
   const rawDirs = [...new Set((options?.rawDirs || []).filter(Boolean))];
   const exportDirs = [...new Set((options?.exportDirs || []).filter(Boolean))];
@@ -548,11 +609,11 @@ function startImportTask(options) {
   if (needsProcessed && !exportDirs.length) {
     throw new Error("choose at least one Processed Media file or folder");
   }
-  const current = latestJobStatus("import");
+  const current = await latestJobStatus("import");
   if (current.running) {
     return current;
   }
-  const job = createJob("import", { raw_dirs: rawDirs, export_dirs: exportDirs, mode });
+  const job = await createJob("import", { raw_dirs: rawDirs, export_dirs: exportDirs, mode });
   const command = ["run-import-job", "--job-id", job.job_id, "--mode", mode];
   for (const rawDir of rawDirs) {
     command.push("--raw-dir", rawDir);
@@ -564,12 +625,12 @@ function startImportTask(options) {
   return formatJobStatus(job);
 }
 
-function startPreviewTask(kind = "preview") {
-  const current = latestJobStatus("preview");
+async function startPreviewTask(kind = "preview") {
+  const current = await latestJobStatus("preview");
   if (current.running) {
     return current;
   }
-  const job = createJob("preview", { kind, asset_type: "export" });
+  const job = await createJob("preview", { kind, asset_type: "export" });
   launchSidecarJob(["run-preview-job", "--job-id", job.job_id, "--kind", kind, "--asset-type", "export"]);
   return formatJobStatus(job);
 }
@@ -595,7 +656,7 @@ async function startAiRepaintTask(options) {
   if (!prompt.trim() && !isUpscale) {
     throw new Error("Missing prompt");
   }
-  const current = latestJobStatus("ai_repaint");
+  const current = await latestJobStatus("ai_repaint");
   if (current.running) {
     return current;
   }
@@ -624,7 +685,7 @@ async function startAiRepaintTask(options) {
     temperature: typeof options?.temperature === "number" ? options.temperature : null,
     model,
   };
-  const job = createJob("ai_repaint", payload);
+  const job = await createJob("ai_repaint", payload);
   const command = [
     "run-ai-repaint-job",
     "--job-id",
@@ -752,13 +813,28 @@ function buildAppMenu() {
   return Menu.buildFromTemplate(template);
 }
 
-ipcMain.handle("workspace:summary", () => {
-  return JSON.parse(callSidecar(["summary", "--json"]));
+ipcMain.handle("workspace:summary", async () => {
+  console.log("[ipc:summary] catalogPath:", currentCatalogPath, "hasDb:", catalogHasDb());
+  if (!currentCatalogPath || !catalogHasDb()) {
+    return { total_exports: 0, total_raws: 0, matched: 0, unmatched: 0, pending: 0 };
+  }
+  try {
+    const payload = await callSidecarAsync(["summary", "--json"]);
+    return payload ? JSON.parse(payload) : { total_exports: 0, total_raws: 0, matched: 0, unmatched: 0, pending: 0 };
+  } catch (err) {
+    console.warn("[workspace:summary] sidecar error:", err.message);
+    return { total_exports: 0, total_raws: 0, matched: 0, unmatched: 0, pending: 0 };
+  }
 });
 
-ipcMain.handle("workspace:roots", () => {
-  const payload = callSidecar(["catalog-roots"]);
-  return payload ? JSON.parse(payload) : [];
+ipcMain.handle("workspace:roots", async () => {
+  if (!currentCatalogPath || !catalogHasDb()) return [];
+  try {
+    return await callSidecarJsonAsync(["catalog-roots"]) || [];
+  } catch (err) {
+    console.warn("[workspace:roots] sidecar error:", err.message);
+    return [];
+  }
 });
 
 ipcMain.handle("workspace:pick-directories", async (_event, kind) => {
@@ -774,18 +850,24 @@ ipcMain.handle("workspace:register-roots", (_event, rootType, paths) => {
 });
 
 ipcMain.handle("workspace:pick-catalog", async () => {
+  const defaultDir = isPackaged
+    ? app.getPath("documents")
+    : path.join(rootDir, "data");
   const result = await dialog.showOpenDialog({
     title: "Choose catalog",
     properties: ["openDirectory"],
-    defaultPath: path.join(rootDir, "data"),
+    defaultPath: defaultDir,
   });
   return result.canceled ? null : result.filePaths[0];
 });
 
 ipcMain.handle("workspace:create-catalog", async () => {
+  const defaultDir = isPackaged
+    ? path.join(app.getPath("documents"), "Framebase")
+    : path.join(rootDir, "data");
   const result = await dialog.showSaveDialog({
     title: "Create catalog",
-    defaultPath: path.join(rootDir, "data", "untitled.mwcatalog"),
+    defaultPath: path.join(defaultDir, "untitled.mwcatalog"),
     buttonLabel: "Create Catalog",
   });
   if (result.canceled || !result.filePath) {
@@ -794,25 +876,44 @@ ipcMain.handle("workspace:create-catalog", async () => {
   return createCatalogAt(result.filePath);
 });
 
-ipcMain.handle("workspace:switch-catalog", (_event, nextCatalogPath) => {
+ipcMain.handle("workspace:switch-catalog", async (_event, nextCatalogPath) => {
+  console.log("[ipc:switch-catalog] nextCatalogPath:", nextCatalogPath, "scratchCatalogPath:", scratchCatalogPath);
+  if (!nextCatalogPath && !scratchCatalogPath) {
+    currentCatalogPath = null;
+    console.log("[ipc:switch-catalog] cleared currentCatalogPath (packaged mode, no path)");
+    return true;
+  }
   currentCatalogPath = normalizeCatalogPath(nextCatalogPath || scratchCatalogPath) || scratchCatalogPath;
-  prepareCatalogPath();
+  console.log("[ipc:switch-catalog] currentCatalogPath set to:", currentCatalogPath);
+  await prepareCatalogPath();
   return true;
 });
 
-ipcMain.handle("workspace:import-status", () => latestJobStatus("import"));
+ipcMain.handle("workspace:import-status", async () => {
+  if (!currentCatalogPath || !catalogHasDb()) return formatJobStatus(null);
+  try { return await latestJobStatus("import"); } catch { return formatJobStatus(null); }
+});
 
 ipcMain.handle("workspace:import-start", (_event, options) => startImportTask(options));
 
-ipcMain.handle("workspace:enrichment-status", () => latestJobStatus("enrichment"));
+ipcMain.handle("workspace:enrichment-status", async () => {
+  if (!currentCatalogPath || !catalogHasDb()) return formatJobStatus(null);
+  try { return await latestJobStatus("enrichment"); } catch { return formatJobStatus(null); }
+});
 
 ipcMain.handle("workspace:enrich-start", () => startEnrichmentTask());
 
-ipcMain.handle("workspace:preview-status", () => latestJobStatus("preview"));
+ipcMain.handle("workspace:preview-status", async () => {
+  if (!currentCatalogPath || !catalogHasDb()) return formatJobStatus(null);
+  try { return await latestJobStatus("preview"); } catch { return formatJobStatus(null); }
+});
 
 ipcMain.handle("workspace:preview-start", (_event, kind) => startPreviewTask(kind || "preview"));
 
-ipcMain.handle("workspace:ai-repaint-status", () => latestJobStatus("ai_repaint"));
+ipcMain.handle("workspace:ai-repaint-status", async () => {
+  if (!currentCatalogPath || !catalogHasDb()) return formatJobStatus(null);
+  try { return await latestJobStatus("ai_repaint"); } catch { return formatJobStatus(null); }
+});
 
 ipcMain.handle("workspace:ai-repaint-start", (_event, options) => startAiRepaintTask(options));
 
@@ -833,7 +934,7 @@ ipcMain.handle("workspace:list-ai-models", async (_event, providerId, providerTy
   try {
     const cmd = ["list-ai-models", "--provider", typeKey, "--api-key", apiKey];
     if (baseUrl) cmd.push("--base-url", baseUrl);
-    return callSidecarJson(cmd) || [];
+    return await callSidecarJsonAsync(cmd) || [];
   } catch (err) {
     console.error("[list-ai-models] error:", err.message);
     return [];
@@ -877,12 +978,19 @@ ipcMain.handle("workspace:delete-ai-provider-token", async (_event, provider) =>
   return { provider: String(provider || ""), configured: false };
 });
 
-ipcMain.handle("workspace:pending", () => {
-  const payload = callSidecar(["list-pending"]);
-  return payload ? JSON.parse(payload) : [];
+ipcMain.handle("workspace:pending", async () => {
+  if (!currentCatalogPath || !catalogHasDb()) return [];
+  try {
+    return await callSidecarJsonAsync(["list-pending"]) || [];
+  } catch (err) {
+    console.warn("[workspace:pending] sidecar error:", err.message);
+    return [];
+  }
 });
 
 ipcMain.handle("workspace:browse", async (_event, options) => {
+  console.log("[ipc:browse] catalogPath:", currentCatalogPath, "hasDb:", catalogHasDb(), "options:", JSON.stringify(options));
+  if (!currentCatalogPath || !catalogHasDb()) return [];
   const command = [
     "browse-exports",
     "--status",
@@ -1118,15 +1226,21 @@ ipcMain.handle("workspace:info", () => workspaceInfo());
 
 // --- Collections ---
 
-ipcMain.handle("workspace:list-collections", () => {
-  return callSidecarJson(["list-collections"]) || [];
+ipcMain.handle("workspace:list-collections", async () => {
+  if (!currentCatalogPath || !catalogHasDb()) return [];
+  try {
+    return await callSidecarJsonAsync(["list-collections"]) || [];
+  } catch (err) {
+    console.warn("[workspace:list-collections] sidecar error:", err.message);
+    return [];
+  }
 });
 
-ipcMain.handle("workspace:create-collection", (_event, name, kind) => {
-  return callSidecarJson(["create-collection", "--name", name, "--kind", kind || "manual"]);
+ipcMain.handle("workspace:create-collection", async (_event, name, kind) => {
+  return await callSidecarJsonAsync(["create-collection", "--name", name, "--kind", kind || "manual"]);
 });
 
-ipcMain.handle("workspace:update-collection", (_event, collectionId, updates) => {
+ipcMain.handle("workspace:update-collection", async (_event, collectionId, updates) => {
   const command = ["update-collection", "--collection-id", collectionId];
   if (updates.name != null) {
     command.push("--name", updates.name);
@@ -1137,38 +1251,39 @@ ipcMain.handle("workspace:update-collection", (_event, collectionId, updates) =>
   if (updates.sortOrder != null) {
     command.push("--sort-order", String(updates.sortOrder));
   }
-  return callSidecarJson(command);
+  return await callSidecarJsonAsync(command);
 });
 
-ipcMain.handle("workspace:delete-collection", (_event, collectionId) => {
-  return callSidecarJson(["delete-collection", "--collection-id", collectionId]);
+ipcMain.handle("workspace:delete-collection", async (_event, collectionId) => {
+  return await callSidecarJsonAsync(["delete-collection", "--collection-id", collectionId]);
 });
 
-ipcMain.handle("workspace:collection-add-items", (_event, collectionId, assetIds) => {
+ipcMain.handle("workspace:collection-add-items", async (_event, collectionId, assetIds) => {
   const command = ["collection-add-items", "--collection-id", collectionId];
   for (const id of assetIds) {
     command.push("--asset-id", id);
   }
-  return callSidecarJson(command);
+  return await callSidecarJsonAsync(command);
 });
 
-ipcMain.handle("workspace:collection-remove-items", (_event, collectionId, assetIds) => {
+ipcMain.handle("workspace:collection-remove-items", async (_event, collectionId, assetIds) => {
   const command = ["collection-remove-items", "--collection-id", collectionId];
   for (const id of assetIds) {
     command.push("--asset-id", id);
   }
-  return callSidecarJson(command);
+  return await callSidecarJsonAsync(command);
 });
 
-ipcMain.handle("workspace:set-asset-rating", (_event, assetIds, rating) => {
+ipcMain.handle("workspace:set-asset-rating", async (_event, assetIds, rating) => {
   const command = ["set-asset-rating", "--rating", String(rating)];
   for (const id of assetIds || []) {
     command.push("--asset-id", id);
   }
-  return callSidecarJson(command);
+  return await callSidecarJsonAsync(command);
 });
 
 ipcMain.handle("workspace:browse-collection", async (_event, collectionId, options) => {
+  if (!currentCatalogPath || !catalogHasDb()) return [];
   return await callSidecarJsonAsync([
     "browse-collection",
     "--collection-id",
@@ -1180,12 +1295,37 @@ ipcMain.handle("workspace:browse-collection", async (_event, collectionId, optio
   ]) || [];
 });
 
+ipcMain.handle("workspace:list-system-fonts", async () => {
+  try {
+    const { exec } = require("child_process");
+    const { promisify } = require("util");
+    const run = promisify(exec);
+    if (process.platform === "darwin") {
+      // Use JXA (JavaScript for Automation) via osascript — more reliable than swift CLI
+      const { stdout } = await run(
+        `osascript -l JavaScript -e 'ObjC.import("AppKit"); const mgr = $.NSFontManager.sharedFontManager; const arr = mgr.availableFontFamilies; const r = []; for (let i = 0; i < arr.count; i++) r.push(arr.objectAtIndex(i).js); r.sort().join("\\n")'`,
+        { maxBuffer: 10 * 1024 * 1024, timeout: 10000 }
+      );
+      return stdout.trim().split("\n").filter(Boolean);
+    } else if (process.platform === "win32") {
+      const { stdout } = await run(
+        'powershell -Command "[System.Reflection.Assembly]::LoadWithPartialName(\'System.Drawing\') | Out-Null; (New-Object System.Drawing.Text.InstalledFontCollection).Families | ForEach-Object { $_.Name }"',
+        { maxBuffer: 10 * 1024 * 1024 }
+      );
+      return stdout.trim().split("\r\n").filter(Boolean);
+    }
+    return [];
+  } catch {
+    return [];
+  }
+});
+
 app.whenReady().then(() => {
   protocol.handle("media", (request) => {
     const raw = request.url.slice("media://".length);
     const filePath = raw.split("/").map((seg) => decodeURIComponent(seg)).join(path.sep);
     const resolved = path.resolve(filePath);
-    const inCatalog = resolved === currentCatalogPath || resolved.startsWith(currentCatalogPath + path.sep);
+    const inCatalog = currentCatalogPath && (resolved === currentCatalogPath || resolved.startsWith(currentCatalogPath + path.sep));
     const existsOnDisk = fs.existsSync(resolved);
     if (!inCatalog && !existsOnDisk) {
       return new Response("forbidden", { status: 403 });

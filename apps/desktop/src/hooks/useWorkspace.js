@@ -174,7 +174,9 @@ export default function useWorkspace() {
   }
 
   async function loadBrowser({ nextStatus = status, append = false, collectionId = activeCollectionId, search = query.trim() || undefined, force = false } = {}) {
+    console.log("[loadBrowser] called, browserLoading:", browserLoading, "force:", force, "append:", append, "browserHasMore:", browserHasMore);
     if (!force && (append ? browserLoadingMore || browserLoading || !browserHasMore : browserLoading)) {
+      console.log("[loadBrowser] SKIPPED — guard triggered");
       return;
     }
     const requestId = browserRequestIdRef.current + 1;
@@ -324,7 +326,8 @@ export default function useWorkspace() {
     }
   }
 
-  async function refreshAll({ nextStatus = status, collectionId = activeCollectionId } = {}) {
+  async function refreshAll({ nextStatus = status, collectionId = activeCollectionId, force = false } = {}) {
+    console.log("[refreshAll] starting, nextStatus:", nextStatus, "collectionId:", collectionId, "force:", force);
     const [nextInfo, nextSummary, nextRoots, nextImportTask, nextPreviewTask, nextEnrichmentTask] = await Promise.all([
       window.mediaWorkspace.getInfo(),
       window.mediaWorkspace.getSummary(),
@@ -339,7 +342,8 @@ export default function useWorkspace() {
     setImportTask(nextImportTask);
     setPreviewTask(nextPreviewTask);
     setEnrichmentTask(nextEnrichmentTask);
-    await Promise.all([loadCollections(), loadBrowser({ nextStatus, collectionId })]);
+    await Promise.all([loadCollections(), loadBrowser({ nextStatus, collectionId, force })]);
+    console.log("[refreshAll] done");
   }
 
   async function startIncrementalImport({ rawDirs: nextRawDirs = [], exportDirs: nextExportDirs = [], fullCatalog = false }) {
@@ -424,10 +428,10 @@ export default function useWorkspace() {
     setStatus("all");
     setSort("name-asc");
     setQuery("");
-    setSelectedExportPath(null);
     setItems([]);
     setDetail(null);
     setBrowserReady(false);
+    setBrowserLoading(false);
     setBrowserOffset(0);
     setBrowserHasMore(true);
     setImportTask(null);
@@ -436,7 +440,7 @@ export default function useWorkspace() {
     setPendingImport({ rawDirs: [], exportDirs: [] });
     setCollections([]);
     setActiveCollectionId(null);
-    await refreshAll({ nextStatus: "all" });
+    await refreshAll({ nextStatus: "all", force: true });
   }
 
   useEffect(() => {

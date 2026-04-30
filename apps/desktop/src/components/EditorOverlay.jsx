@@ -10,6 +10,7 @@ import {
   RotateCcw,
   RotateCw,
   Sparkles,
+  Type,
   Undo2,
   X,
 } from "lucide-react";
@@ -17,6 +18,8 @@ import { fileName, localFileUrl } from "../utils/format";
 import { ASPECT_PRESETS, getAspectRatio, resizeCropRect } from "./editor/cropMath";
 import AiRepaintPanel from "./editor/AiRepaintPanel";
 import BeforeAfterCompare from "./editor/BeforeAfterCompare";
+import TextPanel from "./editor/TextPanel";
+import TextCanvas from "./editor/TextCanvas";
 
 const PREVIEW_MAX_EDGE = 2200;
 const PANEL_WIDTH = 320;
@@ -43,6 +46,14 @@ const BASE_STATE = {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function hexToRgba(hex, alpha = 1) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function rectEquals(a, b) {
@@ -581,6 +592,10 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
   const [saving, setSaving] = useState(false);
   const [activeInteraction, setActiveInteraction] = useState(null);
   const [compareState, setCompareState] = useState(null); // { afterPath, layout: "side"|"stack" }
+  const [textLayers, setTextLayers] = useState([]);
+  const [textSelectedIds, setTextSelectedIds] = useState(new Set());
+  const textHistoryRef = useRef([]);
+  const textHistoryIndexRef = useRef(-1);
 
   const sourcePath = item?.export_path || item?.export_preview_path || item?.raw_preview_path || null;
   const sourceLabel = fileName(sourcePath) || item?.stem || "Selected asset";
@@ -602,7 +617,9 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
     ? { title: "Crop", badge: null }
     : tool === "ai"
       ? { title: "AI Repaint", badge: null }
-      : { title: "Other Tools", badge: null };
+      : tool === "text"
+        ? { title: "Text", badge: null }
+        : { title: "Other Tools", badge: null };
 
   function syncHistory(nextHistory, nextIndex) {
     historyRef.current = nextHistory;
@@ -626,6 +643,132 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
     return snapshot;
   }
 
+  function handleTextLayersChange(nextLayers) {
+    const snap = nextLayers.map((l) => ({ ...l }));
+    textHistoryRef.current = textHistoryRef.current.slice(0, textHistoryIndexRef.current + 1);
+    textHistoryRef.current.push(snap);
+    textHistoryIndexRef.current = textHistoryRef.current.length - 1;
+    setTextLayers(snap);
+  }
+  function textUndo() {
+    if (textHistoryIndexRef.current <= 0) return;
+    textHistoryIndexRef.current--;
+    setTextLayers(textHistoryRef.current[textHistoryIndexRef.current]);
+  }
+  function textRedo() {
+    if (textHistoryIndexRef.current >= textHistoryRef.current.length - 1) return;
+    textHistoryIndexRef.current++;
+    setTextLayers(textHistoryRef.current[textHistoryIndexRef.current]);
+  }
+  function textReset() {
+    handleTextLayersChange([]);
+    setTextSelectedIds(new Set());
+  }
+  function textResetHard() {
+    setTextLayers([]);
+    setTextSelectedIds(new Set());
+    textHistoryRef.current = [[]];
+    textHistoryIndexRef.current = 0;
+  }
+
+  function drawTextLayersOnCanvas(ctx, canvasWidth, canvasHeight, layersToRender) {
+    const scale = canvasWidth / 1920;
+    for (const layer of layersToRender) {
+      const px = layer.x * canvasWidth;
+      const py = layer.y * canvasHeight;
+      ctx.save();
+      ctx.translate(px, py);
+      if (layer.rotation) ctx.rotate((layer.rotation * Math.PI) / 180);
+
+      const fontStyle = layer.italic ? "italic" : "normal";
+      const fontWeight = layer.fontWeight ?? (layer.bold ? 700 : 400);
+      const fontSize = layer.fontSize * scale;
+      ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px "${layer.fontFamily}", sans-serif`;
+      ctx.textAlign = layer.align;
+      ctx.textBaseline = "middle";
+
+      const metrics = ctx.measureText(layer.text || " ");
+      const tw = metrics.width;
+      const th = fontSize * 1.2;
+      let alignOffsetX = 0;
+      if (layer.align === "left") alignOffsetX = tw / 2;
+      else if (layer.align === "right") alignOffsetX = -tw / 2;
+
+      // Background
+      if (layer.bgMode === "solid") {
+        const padH = fontSize * (layer.bgPadH ?? 25) / 100;
+        const padV = fontSize * (layer.bgPadV ?? 15) / 100;
+        ctx.fillStyle = hexToRgba(layer.bgColor, layer.bgOpacity / 100);
+        ctx.fillRect(-tw / 2 - padH, -th / 2 - padV, tw + padH * 2, th + padV * 2);
+      }
+
+      // Shadow
+      if (layer.shadow) {
+        ctx.shadowColor = hexToRgba(layer.shadowColor, layer.shadowOpacity / 100);
+        ctx.shadowBlur = layer.shadowBlur * scale;
+        ctx.shadowOffsetX = layer.shadowX * scale;
+        ctx.shadowOffsetY = layer.shadowY * scale;
+      }
+
+      // Fill
+      ctx.globalAlpha = layer.opacity / 100;
+      if (layer.fillMode === "gradient") {
+        const angle = (layer.gradientAngle * Math.PI) / 180;
+        const gx = Math.cos(angle) * tw / 2;
+        const gy = Math.sin(angle) * tw / 2;
+        const grad = ctx.createLinearGradient(-gx, -gy, gx, gy);
+        grad.addColorStop(0, layer.gradientFrom);
+        grad.addColorStop(1, layer.gradientTo);
+        ctx.fillStyle = grad;
+      } else {
+        ctx.fillStyle = hexToRgba(layer.fillColor, (layer.fillOpacity ?? 100) / 100);
+      }
+
+      // Outer stroke: draw stroke first (2x width), then fill on top to cover inner half
+      if (layer.strokeEnabled && layer.strokeWidth > 0) {
+        ctx.strokeStyle = layer.strokeColor;
+        ctx.lineWidth = layer.strokeWidth * scale * 2;
+        ctx.lineJoin = "round";
+        ctx.strokeText(layer.text || " ", alignOffsetX, 0);
+        ctx.shadowColor = "transparent";
+      }
+
+      ctx.fillText(layer.text || " ", alignOffsetX, 0);
+
+      ctx.restore();
+    }
+  }
+
+  function handleTextApply() {
+    if (!sourceImage || textLayers.length === 0) return;
+    const { width: sw, height: sh } = getSourceDimensions(sourceImage);
+    const composite = document.createElement("canvas");
+    composite.width = sw;
+    composite.height = sh;
+    const ctx = composite.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(sourceImage, 0, 0, sw, sh);
+
+    drawTextLayersOnCanvas(ctx, sw, sh, textLayers);
+
+    composite.naturalWidth = sw;
+    composite.naturalHeight = sh;
+    const nextPreview = buildPreviewSource(composite);
+    const previousSource = sourceImageRef.current;
+    sourceImageRef.current = composite;
+    setSourceImage(composite);
+    setPreviewSource(nextPreview);
+    nativeSaveSourcePathRef.current = null;
+    releaseCanvasImage(previousSource);
+    baseSnapshotRef.current = null;
+    quickSavePathRef.current = null;
+    syncHistory([], -1);
+    applyState(BASE_STATE);
+    textResetHard();
+    setMessage("Text applied");
+  }
+
   useEffect(() => {
     if (!open || !sourcePath) return undefined;
     let active = true;
@@ -640,6 +783,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
     nativeSaveSourcePathRef.current = sourcePath;
     syncHistory([], -1);
     applyState(BASE_STATE);
+    textResetHard();
 
     // Release previous source image canvas memory
     const prevSource = sourceImageRef.current;
@@ -1144,8 +1288,8 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
     try {
       const normalized = getNormalizedCrop();
 
-      // Try native sharp processing (full resolution)
-      if (window.mediaWorkspace?.processAndSave && nativeSaveSourcePathRef.current) {
+      // Try native sharp processing (full resolution) — skip if text layers exist
+      if (window.mediaWorkspace?.processAndSave && nativeSaveSourcePathRef.current && textLayers.length === 0) {
         try {
           await window.mediaWorkspace.processAndSave({
             sourcePath: nativeSaveSourcePathRef.current,
@@ -1209,6 +1353,28 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
         exportRect.width,
         exportRect.height,
       );
+
+      // Composite text layers onto the output canvas
+      if (textLayers.length > 0) {
+        // Text layer coordinates are relative to the source image (pre-transform).
+        // We need to map them to the cropped output.
+        // For simplicity, draw text relative to the output canvas dimensions.
+        // The text x/y are normalized (0-1) relative to the source, so we need to
+        // adjust for crop offset and scale.
+        const fullW = transformedFull.width;
+        const fullH = transformedFull.height;
+        for (const layer of textLayers) {
+          // Map layer position from full-image coords to cropped output coords
+          const absX = layer.x * fullW - exportRect.x;
+          const absY = layer.y * fullH - exportRect.y;
+          const mappedLayer = {
+            ...layer,
+            x: absX / exportRect.width,
+            y: absY / exportRect.height,
+          };
+          drawTextLayersOnCanvas(context, exportRect.width, exportRect.height, [mappedLayer]);
+        }
+      }
 
       const blob = await canvasToBlob(outputCanvas, inferMimeType(savePath));
       await window.mediaWorkspace?.saveImage?.(savePath, await blob.arrayBuffer(), sourcePath);
@@ -1410,6 +1576,16 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
               />
             </div>
 
+            {/* Text overlay canvas */}
+            <TextCanvas
+              layers={textLayers}
+              selectedIds={textSelectedIds}
+              imageRect={imageRect}
+              onSelectionChange={setTextSelectedIds}
+              onLayersChange={handleTextLayersChange}
+              tool={tool}
+            />
+
             {/* Non-rotating crop overlay — stays axis-aligned, z-10 above rotated image */}
             {showCropUi && cropRect ? (
               <div className="pointer-events-none absolute inset-0" style={{ zIndex: 10 }}>
@@ -1568,6 +1744,19 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
                   <FooterButton icon={Check} label="Apply" onClick={handleApply} disabled={loadState !== "ready"} primary />
                 </div>
               </>
+            ) : tool === "text" ? (
+              <TextPanel
+                layers={textLayers}
+                selectedIds={textSelectedIds}
+                onLayersChange={handleTextLayersChange}
+                onSelectionChange={setTextSelectedIds}
+                onApply={handleTextApply}
+                onReset={textReset}
+                onUndo={textUndo}
+                onRedo={textRedo}
+                canUndo={textHistoryIndexRef.current > 0}
+                canRedo={textHistoryIndexRef.current < textHistoryRef.current.length - 1}
+              />
             ) : tool !== "ai" ? (
               <div className="px-4 py-4">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted2">Other Tools</div>
@@ -1587,6 +1776,7 @@ export default function EditorOverlay({ open, item, onClose, onSaveComplete }) {
             data-editor-wheel-scope="toolbar"
           >
             <ToolTab active={tool === "crop"} icon={Crop} label="Crop" onClick={() => setTool("crop")} />
+            <ToolTab active={tool === "text"} icon={Type} label="Text" onClick={() => setTool("text")} />
             <ToolTab active={tool === "ai"} icon={Sparkles} label="AI Repaint" onClick={() => setTool("ai")} />
             <ToolTab active={tool === "other"} icon={MoreHorizontal} label="Other Tools" onClick={() => setTool("other")} />
           </div>

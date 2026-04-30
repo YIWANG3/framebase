@@ -25,3 +25,8 @@ RESOURCES/
 design/
 .omx
 .omx/
+release/
+services/sidecar/dist/
+services/sidecar/build/
+services/sidecar/*.spec
+services/sidecar/entry.py
